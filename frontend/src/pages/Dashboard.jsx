@@ -176,13 +176,13 @@ function Dashboard() {
                 </h3>
                 <div className="space-y-4 text-xs">
                   <div className="p-3 bg-amber-50 border-l-4 border-amber-500 rounded text-amber-900 shadow-sm">
-                    <p className="font-semibold leading-relaxed">{summary?.pending_documents ?? '—'} documentos pendientes de validación</p>
+                    <p className="font-semibold leading-relaxed">{summary?.pending_documents ?? ''} documentos pendientes de validación</p>
                   </div>
                   <div className="p-3 bg-amber-50 border-l-4 border-amber-500 rounded text-amber-900 shadow-sm">
-                    <p className="font-semibold leading-relaxed">{summary?.pending_technical_evaluations ?? '—'} evaluaciones técnicas pendientes</p>
+                    <p className="font-semibold leading-relaxed">{summary?.pending_technical_evaluations ?? ''} evaluaciones técnicas pendientes</p>
                   </div>
                   <div className="p-3 bg-blue-50 border-l-4 border-blue-500 rounded text-blue-900 shadow-sm">
-                    <p className="font-semibold leading-relaxed">{summary?.expiring_requests ?? '—'} solicitudes próximas a vencer</p>
+                    <p className="font-semibold leading-relaxed">{summary?.expiring_requests ?? ''} solicitudes próximas a vencer</p>
                   </div>
                 </div>
                 <div className="mt-4 text-right">

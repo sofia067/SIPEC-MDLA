@@ -12,6 +12,20 @@ body,
   overflow: hidden;
 }
 
+.applicant-portal {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.candidate-auth-page {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.candidate-auth-page > section {
+  margin-block: auto;
+}
+
 @media (max-width: 767px) {
   .app-shell {
     width: 100%;

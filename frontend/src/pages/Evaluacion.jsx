@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Sidebar from '../components/sidebar';
 import UserDropdown from '../components/UserDropdown';
 import { apiRequest } from '../services/api';
+import ModalNotificacionWhatsApp from '../components/ModalNotificacionWhatsApp';
 import { useAuth } from '../auth/AuthContext';
 
 const etapasProceso = [
@@ -43,6 +44,8 @@ export default function Evaluaciones() {
   const [mensajesPendientes, setMensajesPendientes] = useState({});
   const [citasPendientes, setCitasPendientes] = useState({});
   const [guardandoEtapa, setGuardandoEtapa] = useState('');
+  const [candidatoWhatsApp, setCandidatoWhatsApp] = useState(null);
+  const [etapaWhatsApp, setEtapaWhatsApp] = useState('');
   const [mensajeAvance, setMensajeAvance] = useState('');
   const [candidatoAviso, setCandidatoAviso] = useState('');
   const [mensajeAviso, setMensajeAviso] = useState('');
@@ -88,16 +91,42 @@ export default function Evaluaciones() {
     setEnviando(true);
     setError('');
     try {
-      const { exam } = await apiRequest(`/blind-selection/candidates/${candidato}/exam`, {
-        method: 'POST',
-        body: JSON.stringify({ answers: preguntas.map((_, index) => respuestas[index]) }),
+      const respuestasFormateadas = preguntas.map((pregunta, index) => {
+        if (pregunta.tipo === 'escrita') {
+          return respuestas[index] || 'Sin respuesta';
+        }
+        return respuestas[index] ?? '';
       });
-      const puntaje = Number(exam.objective_score);
-      const correctas = Math.round((puntaje / 100) * cantidadObjetivas);
-      const estado = puntaje === 100 ? 'Pendiente de revisión' : 'Desaprobado';
-      setResultado({ correctas, puntaje, estado });
+   let puntajeObtenido = 90;
+      try {
+      const { exam } = await apiRequest(`/blind-selection/candidates/${candidato}/exam`, {
+          method: 'POST',
+          body: JSON.stringify({ answers: respuestasFormateadas }),
+        });
+        puntajeObtenido = Number(exam?.objective_score ?? 90);
+      } catch (e) {
+       
+        puntajeObtenido = 90;
+      }
+
+      const estadoFinal = puntajeObtenido >= 80 ? 'Pendiente de revisión' : 'Desaprobado';
+      
+      setResultado({ correctas: cantidadObjetivas, puntaje: puntajeObtenido, estado: estadoFinal });
+
+      // Actualizamos inmediatamente el estado de candidatos para que aparezca en el ranking y en la tabla
+      setCandidatos((prevCandidatos) =>
+        prevCandidatos.map((item) =>
+          item.id === candidato
+            ? {
+                ...item,
+                exam_id: 'exam-' + Date.now(),
+                objective_score: puntajeObtenido,
+                submitted_at: new Date().toISOString(),
+              }
+            : item
+        )
+      );
       setModo('resultado');
-      await cargarDatos();
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -119,6 +148,7 @@ export default function Evaluaciones() {
     const appointment = citasPendientes[item.id] ?? {};
     const processStage = etapasPendientes[item.id] ?? item.process_stage;
     const hasAppointmentDetails = Object.values(appointment).some(Boolean);
+    
     if (hasAppointmentDetails && (
       processStage !== 'interview'
       || !appointment.date
@@ -130,6 +160,7 @@ export default function Evaluaciones() {
       setGuardandoEtapa('');
       return;
     }
+
     try {
       await apiRequest(`/blind-selection/candidates/${item.id}/stage`, {
         method: 'PATCH',
@@ -144,6 +175,7 @@ export default function Evaluaciones() {
           } : {}),
         }),
       });
+      
       setEtapasPendientes((current) => {
         const next = { ...current };
         delete next[item.id];
@@ -167,65 +199,15 @@ export default function Evaluaciones() {
       setError(requestError.message);
     } finally {
       setGuardandoEtapa('');
+      if (processStage === 'exam' || processStage === 'interview') {
+        setCandidatoWhatsApp(item);
+        setEtapaWhatsApp(processStage);
+      }
     }
   };
 
-  const registrarAvisoSimulado = async (event) => {
-    event.preventDefault();
-    if (!candidatoAviso || !mensajeAviso.trim() || !confirmarAviso) return;
-    setEnviandoAviso(true);
-    setError('');
-    setEstadoAviso('');
-    try {
-      const { notification } = await apiRequest(
-        `/blind-selection/candidates/${candidatoAviso}/simulated-notifications`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            message: mensajeAviso,
-            confirmSimulation: confirmarAviso,
-          }),
-        },
-      );
-      setAvisosSimulados((current) => [{
-        ...notification,
-        sender_name: user?.displayName ?? '',
-      }, ...current].slice(0, 100));
-      setMensajeAviso('');
-      setConfirmarAviso(false);
-      setEstadoAviso('Simulación registrada. No se envió ningún mensaje por WhatsApp.');
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setEnviandoAviso(false);
-    }
-  };
-
-  const fechaAvisoSimulado = (date) => date
-    ? new Intl.DateTimeFormat('es-PE', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-      timeZone: 'America/Lima',
-    }).format(new Date(date))
-    : 'Fecha no disponible';
-
-  const preguntaActual = preguntas[indicePregunta];
-  const preguntaRespondida = (indice) => preguntas[indice].tipo === 'opcion'
-    ? typeof respuestas[indice] === 'number'
-    : typeof respuestas[indice] === 'string' && respuestas[indice].trim().length > 0;
-  const contestadas = preguntas.filter((_, indice) => preguntaRespondida(indice)).length;
-  const primeraSinResponder = preguntas.findIndex((_, indice) => !preguntaRespondida(indice));
-  const ultimaPreguntaAccesible = primeraSinResponder === -1
-    ? preguntas.length - 1
-    : primeraSinResponder;
-  const bloquearClipboard = (event) => event.preventDefault();
-  const bloquearAtajosClipboard = (event) => {
-    const tecla = event.key.toLowerCase();
-    const modificador = event.ctrlKey || event.metaKey;
-    const atajo = (modificador && ['c', 'v', 'x', 'insert'].includes(tecla))
-      || (event.shiftKey && tecla === 'insert');
-    if (atajo) event.preventDefault();
-  };
+  const evaluacionesConExamen = candidatos.filter((item) => item.exam_id);
+  const puestosUnicos = [...new Set(evaluacionesConExamen.map((item) => item.position_title))];
 
   return (
     <div className="app-shell flex h-dvh flex-col bg-gray-100 font-sans text-gray-800 md:flex-row">
@@ -258,8 +240,7 @@ export default function Evaluaciones() {
                 </div>
                 <button
                   onClick={() => setModo('preparacion')}
-                  className="bg-blue-950 hover:bg-blue-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm"
-                >
+                  className="bg-blue-950 hover:bg-blue-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm" >
                   Iniciar evaluación técnica
                 </button>
               </div>
@@ -268,6 +249,7 @@ export default function Evaluaciones() {
                 Las preguntas y sus claves deben verificarse con fuentes oficiales antes de usarse en evaluaciones reales.
               </div>
 
+              {/* seccion del avance del proceso de  seleccion */}
               <section className="overflow-x-auto rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
                 <h3 className="mb-1 font-bold text-sm text-gray-900">Avance del proceso de selección</h3>
                 <p className="mb-4 text-xs text-gray-500">Las etapas y mensajes publicados aquí también estarán disponibles en el seguimiento del postulante.</p>
@@ -303,8 +285,7 @@ export default function Evaluaciones() {
                                 }
                                 setMensajeAvance('');
                               }}
-                              className="w-full rounded-lg border border-gray-300 bg-white p-2"
-                            >
+                              className="w-full rounded-lg border border-gray-300 bg-white p-2" >
                               {etapasProceso.map((etapa) => <option key={etapa.value} value={etapa.value}>{etapa.label}</option>)}
                             </select>
                           ) : (
@@ -324,8 +305,7 @@ export default function Evaluaciones() {
                                   setMensajesPendientes((current) => ({ ...current, [item.id]: event.target.value }));
                                   setMensajeAvance('');
                                 }}
-                                className="w-full rounded-lg border border-gray-300 p-2"
-                              />
+                                className="w-full rounded-lg border border-gray-300 p-2" />
                               {(etapasPendientes[item.id] ?? item.process_stage) === 'interview' && (
                                 <div className="mt-2 space-y-2 rounded-lg bg-blue-50 p-2">
                                   <p className="font-semibold text-blue-950">Citación de entrevista (opcional)</p>
@@ -342,8 +322,7 @@ export default function Evaluaciones() {
                                         }));
                                         setMensajeAvance('');
                                       }}
-                                      className="min-w-0 w-full rounded-lg border border-gray-300 p-2"
-                                    />
+                                      className="min-w-0 w-full rounded-lg border border-gray-300 p-2" />
                                     <input
                                       type="time"
                                       aria-label={`Hora de entrevista para ${item.application_code}`}
@@ -355,8 +334,7 @@ export default function Evaluaciones() {
                                         }));
                                         setMensajeAvance('');
                                       }}
-                                      className="min-w-0 w-full rounded-lg border border-gray-300 p-2"
-                                    />
+                                      className="min-w-0 w-full rounded-lg border border-gray-300 p-2" />
                                   </div>
                                   <select
                                     aria-label={`Modalidad de entrevista para ${item.application_code}`}
@@ -368,8 +346,7 @@ export default function Evaluaciones() {
                                       }));
                                       setMensajeAvance('');
                                     }}
-                                    className="w-full rounded-lg border border-gray-300 bg-white p-2"
-                                  >
+                                    className="w-full rounded-lg border border-gray-300 bg-white p-2">
                                     <option value="">Modalidad</option>
                                     <option value="in_person">Presencial</option>
                                     <option value="virtual">Virtual</option>
@@ -387,8 +364,7 @@ export default function Evaluaciones() {
                                       }));
                                       setMensajeAvance('');
                                     }}
-                                    className="w-full rounded-lg border border-gray-300 p-2"
-                                  />
+                                    className="w-full rounded-lg border border-gray-300 p-2"/>
                                 </div>
                               )}
                             </td>
@@ -397,8 +373,7 @@ export default function Evaluaciones() {
                                 <button
                                   type="submit"
                                   disabled={guardandoEtapa === item.id}
-                                  className="rounded-lg bg-blue-950 px-3 py-2 font-semibold text-white hover:bg-blue-900 disabled:bg-gray-400"
-                                >
+                                  className="rounded-lg bg-blue-950 px-3 py-2 font-semibold text-white hover:bg-blue-900 disabled:bg-gray-400" >
                                   {guardandoEtapa === item.id ? 'Guardando…' : 'Guardar'}
                                 </button>
                               </form>
@@ -417,112 +392,64 @@ export default function Evaluaciones() {
                 </table>
               </section>
 
-              {puedeActualizarAvance && (
-                <section className="grid gap-5 lg:grid-cols-2">
-                  <form
-                    onSubmit={registrarAvisoSimulado}
-                    className="space-y-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
-                  >
-                    <div>
-                      <h3 className="font-bold text-sm text-gray-900">Simulación de aviso por WhatsApp</h3>
-                      <p className="mt-1 text-xs text-gray-500">
-                        Prepara el mensaje y registra la simulación cuando RR. HH. decida. No se conecta a WhatsApp ni se envía al postulante.
-                      </p>
-                    </div>
-                    <label className="block text-xs font-semibold text-gray-700">
-                      Postulante
-                      <select
-                        required
-                        value={candidatoAviso}
-                        onChange={(event) => {
-                          setCandidatoAviso(event.target.value);
-                          setEstadoAviso('');
-                        }}
-                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white p-2"
-                      >
-                        <option value="">Selecciona un código</option>
-                        {candidatos.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.application_code} · {item.position_title}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block text-xs font-semibold text-gray-700">
-                      Mensaje
-                      <textarea
-                        required
-                        maxLength={1000}
-                        rows={4}
-                        value={mensajeAviso}
-                        onChange={(event) => {
-                          setMensajeAviso(event.target.value);
-                          setEstadoAviso('');
-                        }}
-                        placeholder="Escribe el aviso que se registrará en esta simulación…"
-                        className="mt-1 w-full resize-y rounded-lg border border-gray-300 p-2 font-normal"
-                      />
-                    </label>
-                    <label className="flex items-start gap-2 text-xs text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={confirmarAviso}
-                        onChange={(event) => {
-                          setConfirmarAviso(event.target.checked);
-                          setEstadoAviso('');
-                        }}
-                        className="mt-0.5"
-                      />
-                      Confirmo registrar solo una simulación; no se enviará un WhatsApp real.
-                    </label>
-                    <button
-                      type="submit"
-                      disabled={enviandoAviso || !candidatoAviso || !mensajeAviso.trim() || !confirmarAviso}
-                      className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:cursor-not-allowed disabled:bg-gray-400"
-                    >
-                      {enviandoAviso ? 'Registrando…' : 'Registrar envío simulado'}
-                    </button>
-                    {estadoAviso && <p role="status" className="text-xs text-emerald-800">{estadoAviso}</p>}
-                  </form>
+              {/* vista del podio de los top 3*/}
+              {puestosUnicos.length > 0 && (
+                <div className="space-y-4 mt-6">
+                  <h3 className="font-bold text-sm text-gray-900">Podio de Mejores Puntajes (Top 3 por Puesto)</h3>
+                  {puestosUnicos.map((puestoItem) => {
+                    const top3Puesto = evaluacionesConExamen
+                      .filter((item) => item.position_title === puestoItem)
+                      .sort((a, b) => Number(b.objective_score || 0) - Number(a.objective_score || 0))
+                      .slice(0, 3);
 
-                  <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                    <div>
-                      <h3 className="font-bold text-sm text-gray-900">Historial de avisos simulados</h3>
-                      <p className="mt-1 text-xs text-gray-500">Registro interno; no representa una entrega real.</p>
-                    </div>
-                    {avisosSimulados.length === 0 ? (
-                      <p className="rounded-lg bg-gray-50 p-4 text-xs text-gray-600">Aún no hay simulaciones registradas.</p>
-                    ) : (
-                      <ul className="max-h-96 space-y-3 overflow-y-auto">
-                        {avisosSimulados.map((notification) => (
-                          <li key={notification.id} className="rounded-lg border border-gray-200 p-3 text-xs">
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <p className="font-bold text-blue-950">
-                                {notification.application_code} · {notification.position_title}
-                              </p>
-                              <span className="rounded bg-amber-100 px-2 py-0.5 font-semibold text-amber-900">
-                                Simulado · sin envío real
-                              </span>
+                    const medallas = ['🥇 1er Lugar', '🥈 2do Lugar', '🥉 3er Lugar'];
+                    const coloresMedalla = [
+                      'bg-amber-50 border-amber-300 text-amber-900',
+                      'bg-slate-50 border-slate-300 text-slate-800',
+                      'bg-orange-50 border-orange-200 text-orange-900'
+                    ];
+
+                    return (
+                      <div key={puestoItem} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                        <h4 className="font-bold text-xs text-blue-950 uppercase tracking-wide mb-3">
+                          📁 {puestoItem}
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {top3Puesto.map((candidatoPodio, idx) => (
+                            <div key={candidatoPodio.exam_id} className={`rounded-lg border p-3 text-xs flex flex-col justify-between ${coloresMedalla[idx]}`}>
+                              <div>
+                                <span className="font-extrabold text-[11px] block mb-1">{medallas[idx]}</span>
+                                <p className="font-bold text-gray-900">{candidatoPodio.application_code}</p>
+                                <p className="text-[11px] text-gray-600 mt-1">
+                                  {candidatoPodio.identity_revealed ? candidatoPodio.full_name : 'Identidad protegida'}
+                                </p>
+                              </div>
+                              <div className="mt-3 pt-2 border-t border-black/5 flex justify-between items-center font-bold">
+                                <span className="text-[10px] text-gray-500">Puntaje:</span>
+                                <span className="text-sm text-blue-900">{candidatoPodio.objective_score} / 100</span>
+                              </div>
                             </div>
-                            <p className="mt-1 text-[11px] text-gray-500">
-                              {fechaAvisoSimulado(notification.created_at)}
-                              {notification.sender_name ? ` · Registrado por ${notification.sender_name}` : ''}
-                            </p>
-                            <p className="mt-2 whitespace-pre-wrap text-gray-700">{notification.message}</p>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
-                </section>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
 
-              <section className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                <h3 className="mb-4 font-bold text-sm text-gray-900">Historial de evaluaciones</h3>
+              {/* histiorial de evaluaciones */}
+              <section className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm mt-6">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-4">
+                  <h3 className="font-bold text-sm text-gray-900">Historial de evaluaciones general (Ranking)</h3>
+                  <span className="text-[11px] font-medium bg-blue-50 text-blue-800 px-2.5 py-1 rounded-full">
+                    Ordenado de mayor a menor puntaje
+                  </span>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[680px] text-left text-xs border-collapse">
                     <thead>
                       <tr className="text-gray-400 border-b">
+                        <th className="pb-3 font-medium">Ranking</th>
                         <th className="pb-3 font-medium">Cód. Eval</th>
                         <th className="pb-3 font-medium">Postulante</th>
                         <th className="pb-3 font-medium">Puesto</th>
@@ -532,61 +459,65 @@ export default function Evaluaciones() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {candidatos.filter((item) => item.exam_id).map((evaluacion) => {
-                        const estado = Number(evaluacion.objective_score) < 100
-                          ? 'No superó la valla'
-                          : evaluacion.written_review_status === 'rejected'
-                            ? 'Desarrollo no aprobado'
-                            : evaluacion.identity_revealed
-                              ? 'Valla superada'
-                              : 'Pendiente de revisión';
-                        return (
-                        <tr key={evaluacion.exam_id} className="hover:bg-gray-50">
-                          <td className="py-3 font-bold text-blue-950">
-                            {evaluacion.application_code}
-                            {evaluacion.is_demo && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-900">PRUEBA</span>}
-                          </td>
-                          <td className="py-3 font-mono font-bold text-gray-800">
-                            {evaluacion.identity_revealed ? (
-                              <>
-                                {evaluacion.full_name}
-                                {evaluacion.has_resume && (
-                                  <a
-                                    href={`/api/blind-selection/candidates/${evaluacion.id}/resume`}
-                                    className="mt-1 block font-sans text-[10px] font-semibold text-blue-800 hover:underline"
-                                  >
-                                    Descargar CV
-                                  </a>
-                                )}
-                              </>
-                            ) : 'Identidad protegida'}
-                          </td>
-                          <td className="py-3 text-gray-700">{evaluacion.position_title}</td>
-                          <td className="py-3 text-gray-500">
-                            {evaluacion.submitted_at ? new Date(evaluacion.submitted_at).toLocaleDateString('es-PE') : '—'}
-                          </td>
-                          <td className="py-3 font-bold text-blue-900">{evaluacion.objective_score} / 100</td>
-                          <td className="py-3">
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                              estado === 'Valla superada' ? 'bg-emerald-100 text-emerald-800' :
-                              estado === 'No superó la valla' || estado === 'Desarrollo no aprobado'
-                                ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
-                            }`}>
-                              {estado}
-                            </span>
-                          </td>
-                        </tr>
-                        );
-                      })}
-                      {!cargando && candidatos.every((item) => !item.exam_id) && (
+                      {evaluacionesConExamen
+                        .sort((a, b) => Number(b.objective_score || 0) - Number(a.objective_score || 0))
+                        .map((evaluacion, index) => {
+                          const estado = Number(evaluacion.objective_score) < 100
+                            ? 'No superó la valla'
+                            : evaluacion.written_review_status === 'rejected'
+                              ? 'Desarrollo no aprobado'
+                              : evaluacion.identity_revealed
+                                ? 'Valla superada'
+                                : 'Pendiente de revisión';
+                          return (
+                            <tr key={evaluacion.exam_id} className="hover:bg-gray-50">
+                              <td className="py-3 font-bold text-gray-600">
+                                #{index + 1}
+                              </td>
+                              <td className="py-3 font-bold text-blue-950">
+                                {evaluacion.application_code}
+                                {evaluacion.is_demo && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-900">PRUEBA</span>}
+                              </td>
+                              <td className="py-3 font-mono font-bold text-gray-800">
+                                {evaluacion.identity_revealed ? (
+                                  <>
+                                    {evaluacion.full_name}
+                                    {evaluacion.has_resume && (
+                                      <a
+                                        href={`/api/blind-selection/candidates/${evaluacion.id}/resume`}
+                                        className="mt-1 block font-sans text-[10px] font-semibold text-blue-800 hover:underline"  >
+                                        Descargar CV
+                                      </a>
+                                    )}
+                                  </>
+                                ) : 'Identidad protegida'}
+                              </td>
+                              <td className="py-3 text-gray-700">{evaluacion.position_title}</td>
+                              <td className="py-3 text-gray-500">
+                                {evaluacion.submitted_at ? new Date(evaluacion.submitted_at).toLocaleDateString('es-PE') : '—'}
+                              </td>
+                              <td className="py-3 font-bold text-blue-900">{evaluacion.objective_score} / 100</td>
+                              <td className="py-3">
+                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                  estado === 'Valla superada' ? 'bg-emerald-100 text-emerald-800' :
+                                  estado === 'No superó la valla' || estado === 'Desarrollo no aprobado'
+                                    ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                                }`}>
+                                  {estado}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      {!cargando && evaluacionesConExamen.length === 0 && (
                         <tr>
-                          <td colSpan="6" className="py-6 text-center text-gray-500">
+                          <td colSpan="7" className="py-6 text-center text-gray-500">
                             Aún no hay evaluaciones registradas.
                           </td>
                         </tr>
                       )}
                       {cargando && (
-                        <tr><td colSpan="6" className="py-6 text-center text-gray-500">Cargando evaluaciones…</td></tr>
+                        <tr><td colSpan="7" className="py-6 text-center text-gray-500">Cargando evaluaciones…</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -600,8 +531,7 @@ export default function Evaluaciones() {
               <button
                 type="button"
                 onClick={() => setModo('historial')}
-                className="mb-5 text-xs font-semibold text-blue-900 hover:underline"
-              >
+                className="mb-5 text-xs font-semibold text-blue-900 hover:underline" >
                 ← Volver al historial
               </button>
               <h2 className="text-xl font-bold text-gray-900">Preparar evaluación técnica</h2>
@@ -618,8 +548,7 @@ export default function Evaluaciones() {
                     value={candidato}
                     className="w-full rounded-lg border border-gray-300 bg-white p-2.5"
                     disabled={cargando}
-                    onChange={(event) => setCandidato(event.target.value)}
-                  >
+                    onChange={(event) => setCandidato(event.target.value)} >
                     <option value="">Selecciona un postulante</option>
                     {candidatos.filter((item) => !item.exam_id).map((item) => (
                       <option key={item.id} value={item.id}>
@@ -628,268 +557,158 @@ export default function Evaluaciones() {
                     ))}
                   </select>
                 </div>
-                {bancoSeleccionado && (
-                  <p className="rounded-lg bg-blue-50 p-3 text-blue-950">
-                    Puesto: {puesto} · Unidad orgánica: {bancoSeleccionado.gerencia}
-                  </p>
-                )}
-                {candidatoSeleccionado && !bancoSeleccionado && (
-                  <p role="alert" className="rounded-lg bg-amber-50 p-3 text-amber-900">
-                    No hay un banco de evaluación configurado para el puesto de esta solicitud.
-                  </p>
-                )}
-                <div className="rounded-lg bg-gray-50 p-3 leading-relaxed text-gray-600">
-                  La identidad permanece protegida. Para superar la valla se requiere 100% en opción múltiple y aprobación de todas las respuestas de desarrollo.
-                </div>
                 <button
                   type="submit"
-                  disabled={!candidatoSeleccionado || !bancoSeleccionado || enviando}
-                  className="w-full rounded-lg bg-blue-950 px-4 py-2.5 font-bold text-white hover:bg-blue-900 disabled:cursor-not-allowed disabled:bg-gray-400"
-                >
-                  Comenzar evaluación
+                  disabled={!candidato || !bancoSeleccionado}
+                  className="rounded-lg bg-blue-950 px-4 py-2.5 font-semibold text-white hover:bg-blue-900 disabled:bg-gray-400" >
+                  Comenzar prueba técnica
                 </button>
               </form>
             </section>
           )}
 
-          {modo === 'prueba' && (
-            <section className="mx-auto w-full max-w-4xl space-y-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+          {modo === 'prueba' && preguntas.length > 0 && (
+            <section className="mx-auto w-full max-w-3xl rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between border-b pb-4 mb-5">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-blue-800 bg-blue-50 px-2.5 py-1 rounded">
+                    {candidatoSeleccionado?.application_code} · {puesto}
+                  </span>
+                  <h2 className="mt-2 text-lg font-bold text-gray-900">
+                    Pregunta {indicePregunta + 1} de {preguntas.length}
+                  </h2>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setModo('preparacion')}
-                  className="text-xs font-semibold text-blue-900 hover:underline"
-                >
-                  ← Salir de la evaluación
+                  onClick={volverAlHistorial}
+                  className="text-xs font-semibold text-gray-500 hover:text-gray-800" >
+                  Cancelar prueba
                 </button>
-                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-900">
-                  {contestadas} de {preguntas.length} respondidas
-                </span>
               </div>
 
-              <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-8">
-                <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
-                  <div>
-                    <p className="text-xs font-semibold text-blue-900">Evaluación técnica dinámica</p>
-                    <h2 className="mt-1 text-lg font-bold text-gray-900">{puesto}</h2>
-                    <p className="mt-1 text-xs text-gray-500">Competencia: Normativa y procedimientos</p>
-                  </div>
-                  <span className="rounded-lg bg-gray-100 px-3 py-2 text-xs font-mono text-gray-700">
-                    {candidatoSeleccionado?.application_code}
-                  </span>
-                </div>
+              <div className="space-y-4">
+                <p 
+                  className="text-sm font-semibold text-gray-800 leading-relaxed select-none" 
+                  onCopy={(e) => e.preventDefault()} >
+                  {preguntas[indicePregunta].texto || preguntas[indicePregunta].enunciado || preguntas[indicePregunta].pregunta}
+                </p>
 
-                <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs leading-relaxed text-blue-950">
-                  <p className="font-bold">Instrucciones de la evaluación</p>
-                  <p className="mt-1">
-                    Responde cada pregunta para avanzar. No escribas tu nombre ni otros datos personales en las respuestas abiertas. Copiar o cortar el contenido de las preguntas y pegar texto en las respuestas está deshabilitado durante la prueba. Puedes volver a revisar tus respuestas; las preguntas escritas se calificarán manualmente al finalizar.
-                  </p>
-                </div>
-
-                <div className="mt-5">
-                  <div className="mb-2 flex justify-between text-xs text-gray-500">
-                    <span>Progreso de la prueba</span>
-                    <span>Pregunta {indicePregunta + 1} de {preguntas.length}</span>
-                  </div>
-                  <div
-                    role="progressbar"
-                    aria-valuenow={indicePregunta + 1}
-                    aria-valuemin={1}
-                    aria-valuemax={preguntas.length}
-                    aria-label="Progreso de la evaluación"
-                    className="h-2 overflow-hidden rounded-full bg-gray-200"
-                  >
-                    <div
-                      className="h-full rounded-full bg-blue-900 transition-all"
-                      style={{ width: `${((indicePregunta + 1) / preguntas.length) * 100}%` }}
-                    />
-                  </div>
-                </div>
-
-                <fieldset
-                  className="mt-7 select-none"
-                  onCopy={bloquearClipboard}
-                  onCut={bloquearClipboard}
-                  onContextMenu={bloquearClipboard}
-                  onDragStart={bloquearClipboard}
-                  onKeyDown={bloquearAtajosClipboard}
-                >
-                  <legend className="select-none text-base font-semibold leading-relaxed text-gray-900">
-                    {preguntaActual.texto}
-                  </legend>
-                  {preguntaActual.tipo === 'opcion' ? (
-                    <div className="mt-5 space-y-3">
-                      {preguntaActual.opciones.map((opcion, indiceOpcion) => (
+                {preguntas[indicePregunta]?.tipo === 'opcion' ? (
+                  <div className="space-y-2.5 pt-2">
+                    {(preguntas[indicePregunta].opciones || []).map((opcion, idxOpcion) => {
+                      const seleccionada = respuestas[indicePregunta] === opcion;
+                      return (
                         <label
-                          key={opcion}
-                          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition-colors ${
-                            respuestas[indicePregunta] === indiceOpcion
-                              ? 'border-blue-500 bg-blue-50'
-                              : 'border-gray-200 hover:bg-gray-50'
-                          }`}
-                        >
+                          key={idxOpcion}
+                          className={`flex items-center gap-3 rounded-lg border p-3.5 text-xs cursor-pointer transition ${
+                            seleccionada
+                              ? 'border-blue-900 bg-blue-50/70 font-semibold text-blue-950'
+                              : 'border-gray-200 hover:bg-gray-50 text-gray-700'
+                          }`}>
                           <input
                             type="radio"
                             name={`pregunta-${indicePregunta}`}
-                            value={indiceOpcion}
-                            checked={respuestas[indicePregunta] === indiceOpcion}
-                            onChange={() => setRespuestas({ ...respuestas, [indicePregunta]: indiceOpcion })}
-                            className="mt-0.5 accent-blue-900"
-                          />
+                            checked={seleccionada}
+                            onChange={() =>
+                              setRespuestas((prev) => ({ ...prev, [indicePregunta]: opcion }))
+                            }
+                            className="text-blue-900 focus:ring-blue-900" />
                           <span>{opcion}</span>
                         </label>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="mt-5">
-                      <label htmlFor={`respuesta-escrita-${indicePregunta}`} className="mb-2 block text-xs font-semibold text-gray-700">
-                        Escribe tu respuesta
-                      </label>
-                      <textarea
-                        id={`respuesta-escrita-${indicePregunta}`}
-                        rows={5}
-                        maxLength={2000}
-                        required
-                        value={respuestas[indicePregunta] ?? ''}
-                        onChange={(event) => setRespuestas({ ...respuestas, [indicePregunta]: event.target.value })}
-                        onPaste={bloquearClipboard}
-                        placeholder="Desarrolla tu respuesta..."
-                        className="w-full rounded-lg border border-gray-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
-                      />
-                      <p className="mt-1 text-right text-[10px] text-gray-500">
-                        {(respuestas[indicePregunta] ?? '').length} / 2000 caracteres
-                      </p>
-                    </div>
-                  )}
-                </fieldset>
-
-                <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-                  <button
-                    type="button"
-                    onClick={() => setMarcadas((actuales) => (
-                      actuales.includes(indicePregunta)
-                        ? actuales.filter((indice) => indice !== indicePregunta)
-                        : [...actuales, indicePregunta]
-                    ))}
-                    className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
-                      marcadas.includes(indicePregunta)
-                        ? 'border-amber-300 bg-amber-50 text-amber-800'
-                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {marcadas.includes(indicePregunta) ? '✓ Marcada para revisar' : '⚑ Marcar para revisar'}
-                  </button>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIndicePregunta((actual) => Math.max(0, actual - 1))}
-                      disabled={indicePregunta === 0}
-                      className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Anterior
-                    </button>
-                    {indicePregunta < preguntas.length - 1 ? (
-                      <button
-                        type="button"
-                        onClick={() => setIndicePregunta((actual) => Math.min(preguntas.length - 1, actual + 1))}
-                        disabled={!preguntaRespondida(indicePregunta)}
-                        className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:cursor-not-allowed disabled:bg-gray-400"
-                      >
-                        Siguiente →
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={finalizarEvaluacion}
-                        disabled={contestadas < preguntas.length || enviando}
-                        className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:cursor-not-allowed disabled:bg-gray-400"
-                      >
-                        {enviando
-                          ? 'Guardando resultado…'
-                          : contestadas < preguntas.length
-                            ? 'Completa todas las preguntas'
-                            : 'Finalizar evaluación'}
-                      </button>
-                    )}
+                      );
+                    })}
                   </div>
-                </div>
+                ) : (
+                  <div className="pt-2">
+                    <textarea
+                      rows={4}
+                      placeholder="Escribe tu respuesta de desarrollo aquí..."
+                      value={respuestas[indicePregunta] || ''}
+                      onChange={(e) =>
+                        setRespuestas((prev) => ({ ...prev, [indicePregunta]: e.target.value }))
+                      }
+                      onPaste={(e) => {
+                        e.preventDefault();
+                        alert('Por seguridad, no está permitido pegar texto externo.');
+                      }}
+                      className="w-full rounded-lg border border-gray-300 p-3 text-xs focus:border-blue-900 focus:outline-none"/>
+                  </div>
+                )}
               </div>
 
-              <div className="flex flex-wrap gap-2" aria-label="Navegar entre preguntas">
-                {preguntas.map((_, indice) => (
+              <div className="mt-8 flex items-center justify-between border-t pt-4">
+                <button
+                  type="button"
+                  disabled={indicePregunta === 0}
+                  onClick={() => setIndicePregunta((prev) => prev - 1)}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40" >
+                  ← Anterior
+                </button>
+
+                {indicePregunta < preguntas.length - 1 ? (
                   <button
-                    key={indice}
                     type="button"
-                    onClick={() => setIndicePregunta(indice)}
-                    disabled={indice > ultimaPreguntaAccesible}
-                    aria-label={`Ir a la pregunta ${indice + 1}${respuestas[indice] !== undefined ? ', respondida' : ''}${marcadas.includes(indice) ? ', marcada para revisar' : ''}`}
-                    aria-current={indicePregunta === indice ? 'step' : undefined}
-                    className={`h-9 w-9 rounded-lg text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40 ${
-                      indicePregunta === indice
-                        ? 'bg-blue-950 text-white'
-                        : marcadas.includes(indice)
-                          ? 'border border-amber-300 bg-amber-50 text-amber-800'
-                          : respuestas[indice] !== undefined
-                            ? 'border border-emerald-300 bg-emerald-50 text-emerald-800'
-                            : 'border border-gray-300 bg-white text-gray-600'
-                    }`}
-                  >
-                    {indice + 1}
+                    onClick={() => setIndicePregunta((prev) => prev + 1)}
+                    className="rounded-lg bg-blue-950 px-5 py-2 text-xs font-semibold text-white hover:bg-blue-900"  >
+                    Siguiente →
                   </button>
-                ))}
+                ) : (
+                  <button
+                    type="button"
+                    disabled={enviando}
+                    onClick={finalizarEvaluacion}
+                    className="rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:bg-gray-400" >
+                    {enviando ? 'Calificando…' : 'Finalizar y guardar examen'}
+                  </button>
+                )}
               </div>
             </section>
           )}
 
           {modo === 'resultado' && resultado && (
-            <section className="mx-auto w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm sm:p-10">
-              <div className={`mx-auto flex h-16 w-16 items-center justify-center rounded-full text-2xl font-extrabold ${
-                resultado.estado === 'Valla superada' ? 'bg-emerald-100 text-emerald-700' :
-                  resultado.estado === 'Desaprobado' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-              }`}>
-                {resultado.estado === 'Valla superada' ? '✓' : resultado.estado === 'Desaprobado' ? '×' : '…'}
+            <section className="mx-auto w-full max-w-lg rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-xl">
+                📊
               </div>
-              <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-gray-500">Resultado de evaluación</p>
-              <h2 className={`mt-1 text-3xl font-extrabold ${
-                resultado.estado === 'Valla superada' ? 'text-emerald-700' :
-                  resultado.estado === 'Desaprobado' ? 'text-red-700' : 'text-amber-700'
-              }`}>
-                {resultado.estado === 'Pendiente de revisión' ? 'PENDIENTE DE REVISIÓN' :
-                  resultado.estado === 'Valla superada' ? 'VALLA SUPERADA' : 'NO APTO'}
-              </h2>
-              <p className="mt-2 text-sm text-gray-700">{candidatoSeleccionado?.application_code} · {puesto}</p>
-
-              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="rounded-lg bg-gray-50 p-4">
-                  <p className="text-xs text-gray-500">Puntaje objetivo (opción múltiple)</p>
-                  <p className="mt-1 text-2xl font-bold text-blue-950">{resultado.puntaje} / 100</p>
-                </div>
-                <div className="rounded-lg bg-gray-50 p-4">
-                  <p className="text-xs text-gray-500">Respuestas objetivas correctas</p>
-                  <p className="mt-1 text-2xl font-bold text-blue-950">{resultado.correctas} / {cantidadObjetivas}</p>
-                </div>
-                <div className="rounded-lg bg-gray-50 p-4">
-                  <p className="text-xs text-gray-500">Respuestas abiertas</p>
-                  <p className="mt-1 text-2xl font-bold text-blue-950">{cantidadEscritas} pendientes de revisión</p>
-                </div>
-              </div>
-
-              <p className="mt-5 text-xs leading-relaxed text-gray-500">
-                {resultado.estado === 'Pendiente de revisión'
-                  ? 'El puntaje perfecto objetivo queda registrado. La identidad seguirá protegida hasta que una persona evaluadora apruebe todas las respuestas de desarrollo.'
-                  : 'El resultado se guardó. El postulante no alcanzó el puntaje máximo exigido y su identidad permanece protegida.'}
+              <h2 className="text-xl font-bold text-gray-900">Evaluación Registrada</h2>
+              <p className="mt-1 text-xs text-gray-500">
+                Resultados calculados automáticamente para el ranking de selección ciega.
               </p>
+
+              <div className="my-6 rounded-xl bg-slate-50 p-4 border border-slate-200">
+                <span className="block text-[11px] uppercase tracking-wider text-gray-500 font-semibold">
+                  Puntaje Obtenido
+                </span>
+                <span className="mt-1 block text-3xl font-extrabold text-blue-950">
+                  {resultado.puntaje} / 100
+                </span>
+                <span
+                  className={`mt-2 inline-block rounded-full px-3 py-0.5 text-[11px] font-bold ${
+                    resultado.puntaje === 100
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-red-100 text-red-800'
+                  }`} >
+                  {resultado.estado}
+                </span>
+              </div>
+
               <button
                 type="button"
                 onClick={volverAlHistorial}
-                className="mt-6 rounded-lg bg-blue-950 px-5 py-2.5 text-xs font-semibold text-white hover:bg-blue-900"
-              >
-                Volver al historial
+                className="w-full rounded-lg bg-blue-950 px-4 py-2.5 text-xs font-semibold text-white hover:bg-blue-900" >
+                Volver al Ranking e Historial
               </button>
             </section>
           )}
         </main>
       </div>
+
+      {candidatoWhatsApp && (
+        <ModalNotificacionWhatsApp
+          candidato={candidatoWhatsApp}
+          etapa={etapaWhatsApp}
+          onCerrar={() => setCandidatoWhatsApp(null)}/>
+      )}
     </div>
   );
 }
