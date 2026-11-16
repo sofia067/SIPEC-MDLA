@@ -15,12 +15,14 @@ async function seedRoleUsers() {
       username: env.AREA_MANAGER_USERNAME.toLowerCase(),
       displayName: env.AREA_MANAGER_DISPLAY_NAME,
       role: 'area_manager',
+      areaName: env.AREA_MANAGER_AREA || null,
       passwordHash: await hashPassword(env.AREA_MANAGER_PASSWORD),
     },
     {
       username: env.HR_SPECIALIST_USERNAME.toLowerCase(),
       displayName: env.HR_SPECIALIST_DISPLAY_NAME,
       role: 'hr_specialist',
+      areaName: null,
       passwordHash: await hashPassword(env.HR_SPECIALIST_PASSWORD),
     },
   ];
@@ -42,6 +44,7 @@ async function seedRoleUsers() {
       user.username,
       user.displayName,
       user.role,
+      user.areaName,
       user.passwordHash,
     ]));
 

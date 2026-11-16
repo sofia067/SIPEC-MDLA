@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { env } from '../config/env.js';
 
@@ -37,27 +37,62 @@ async function getWorker() {
   return workerPromise;
 }
 
-async function extractFromImage(filePath) {
+async function extractFromImage(buffer) {
   const worker = await getWorker();
-  const result = await worker.recognize(filePath);
+  const result = await worker.recognize(buffer);
   return result?.data?.text ?? '';
 }
 
-async function extractFromPdf(filePath) {
-  const buffer = await readFile(filePath);
+async function extractFromPdf(buffer) {
   const parser = new PDFParse({ data: buffer });
   try {
     const result = await parser.getText();
-    return result?.text ?? '';
+    const extractedText = result?.text?.trim() ?? '';
+    if (extractedText) return extractedText;
+
+    const renderedPages = await parser.getScreenshot({
+      first: 20,
+      scale: 1.5,
+      imageDataUrl: false,
+    });
+    const worker = await getWorker();
+    const pageTexts = [];
+    for (const [index, page] of renderedPages.pages.entries()) {
+      const recognized = await worker.recognize(page.data);
+      pageTexts.push(`--- Página ${index + 1} ---\n${recognized?.data?.text ?? ''}`);
+    }
+    if (renderedPages.pages.length === 20) {
+      pageTexts.push('Nota: el OCR procesa como máximo las primeras 20 páginas de un PDF escaneado.');
+    }
+    return pageTexts.join('\n\n');
   } finally {
     await parser.destroy();
   }
 }
 
-export function extractText(filePath, mime) {
+export async function extractPdfMetadata(filePath) {
+  const buffer = await readFile(filePath);
+  const parser = new PDFParse({ data: buffer });
+  try {
+    const result = await parser.getInfo();
+    const dates = result.getDateNode() ?? {};
+    const toIsoString = (value) => (
+      value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : null
+    );
+    return {
+      metadataStatus: 'read',
+      creationDate: toIsoString(dates.CreationDate ?? dates.XmpCreateDate ?? dates.XapCreateDate),
+      modificationDate: toIsoString(dates.ModDate ?? dates.XmpModifyDate ?? dates.XapModifyDate),
+    };
+  } finally {
+    await parser.destroy();
+  }
+}
+
+export function extractText(buffer, mime) {
   const task = queue.then(async () => {
-    if (mime === 'application/pdf') return extractFromPdf(filePath);
-    if (SUPPORTED_IMAGE_MIME.has(mime)) return extractFromImage(filePath);
+    if (mime === 'application/pdf') return extractFromPdf(buffer);
+    if (SUPPORTED_IMAGE_MIME.has(mime)) return extractFromImage(buffer);
     throw new Error(`Tipo de archivo no soportado para OCR: ${mime}`);
   });
   queue = task.then(

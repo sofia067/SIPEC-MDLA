@@ -2,16 +2,26 @@ import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
 import { authenticate } from '../middleware/authenticate.js';
+import { modulesRepository } from '../repositories/modules-repository.js';
 import { authService } from '../services/auth-service.js';
 
 const loginSchema = z.object({
   username: z.string().trim().min(1).max(80),
   password: z.string().min(1).max(256),
-  role: z.enum(['jefe', 'rrhh', 'admin']).transform((role) => ({
+  role: z.enum(['area_manager', 'hr_specialist', 'admin', 'jefe', 'rrhh']).transform((role) => ({
     jefe: 'area_manager',
     rrhh: 'hr_specialist',
+    area_manager: 'area_manager',
+    hr_specialist: 'hr_specialist',
     admin: 'admin',
   })[role]),
+});
+const passwordSchema = z.object({
+  currentPassword: z.string().min(1).max(256),
+  newPassword: z.string().min(12, 'La nueva contraseña debe tener al menos 12 caracteres.').max(256),
+}).refine((data) => data.currentPassword !== data.newPassword, {
+  message: 'La nueva contraseña debe ser distinta a la actual.',
+  path: ['newPassword'],
 });
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -37,6 +47,12 @@ export function createAuthRouter({ secureCookies }) {
     try {
       const credentials = loginSchema.parse(req.body);
       const session = await authService.login(credentials.username, credentials.password, credentials.role);
+      try {
+        await modulesRepository.recordAuthenticationEvent(session.user.id, 'auth.login');
+      } catch (error) {
+        await authService.logout(session.token);
+        throw error;
+      }
       res.cookie('sipec_session', session.token, cookieOptions(secureCookies, session.expiresAt.getTime() - Date.now()));
       return res.json({ user: session.user });
     } catch (error) {
@@ -46,8 +62,25 @@ export function createAuthRouter({ secureCookies }) {
 
   router.get('/me', authenticate, (req, res) => res.json({ user: req.user }));
 
+  router.patch('/password', authenticate, async (req, res, next) => {
+    try {
+      const { currentPassword, newPassword } = passwordSchema.parse(req.body);
+      await authService.changePassword(
+        req.user.id,
+        currentPassword,
+        newPassword,
+        req.cookies.sipec_session,
+      );
+      return res.status(204).end();
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   router.post('/logout', async (req, res, next) => {
     try {
+      const user = await authService.getUserFromToken(req.cookies.sipec_session);
+      if (user) await modulesRepository.recordAuthenticationEvent(user.id, 'auth.logout');
       await authService.logout(req.cookies.sipec_session);
       res.clearCookie('sipec_session', cookieOptions(secureCookies));
       return res.status(204).end();

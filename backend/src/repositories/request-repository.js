@@ -1,14 +1,16 @@
 import { pool } from '../db/pool.js';
 import { AppError } from '../errors/app-error.js';
+import { getRequestIpAddress } from '../middleware/request-context.js';
+
+const priorityToDatabase = {
+  Alta: 'high',
+  Media: 'medium',
+  Baja: 'low',
+};
 
 export const requestRepository = {
   async create({
-    department,
-    positionTitle,
-    reason,
-    requiredBy,
-    priority,
-    userId,
+    department, positionTitle, reason, priority, requiredBy, applicationDeadline, applicationDocuments = [], userId,
   }) {
     const client = await pool.connect();
 
@@ -30,24 +32,24 @@ export const requestRepository = {
       const code = `SC-${String(sequenceResult.rows[0].value).padStart(5, '0')}`;
       const requestResult = await client.query(
         `INSERT INTO coverage_requests
-           (code, department_id, position_id, reason, required_by, priority, requested_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, code, status, created_at`,
-        [code, departmentResult.rows[0].id, positionResult.rows[0].id, reason, requiredBy, priority, userId],
+           (code, department_id, position_id, reason, priority, required_by,
+            application_deadline_original, application_deadline, requested_by, application_documents)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9)
+         RETURNING id, code, status,
+           CASE priority::text
+             WHEN 'high' THEN 'Alta'
+             WHEN 'medium' THEN 'Media'
+             WHEN 'low' THEN 'Baja'
+           END AS priority,
+           created_at`,
+        [code, departmentResult.rows[0].id, positionResult.rows[0].id, reason, priorityToDatabase[priority],
+          requiredBy, applicationDeadline, userId, JSON.stringify(applicationDocuments)],
       );
       const request = requestResult.rows[0];
       await client.query(
-        `INSERT INTO audit_events (actor_id, event_type, resource_type, resource_id, metadata)
-         VALUES ($1, 'coverage_request.created', 'coverage_request', $2, $3)`,
-        [userId, request.id, JSON.stringify({ code })],
-      );
-      await client.query(
-        `INSERT INTO notifications (recipient_id, event_type, title, message, href)
-         SELECT id, 'coverage_request.created', 'Nueva solicitud de cobertura',
-                $2, '/solicitudes-cobertura'
-         FROM users
-         WHERE role IN ('admin', 'hr_specialist') AND is_active = true AND id <> $1`,
-        [userId, `Se registró la solicitud ${code} para ${positionTitle} en ${department}.`],
+        `INSERT INTO audit_events (actor_id, event_type, resource_type, resource_id, metadata, ip_address)
+         VALUES ($1, 'coverage_request.created', 'coverage_request', $2, $3, $4)`,
+        [userId, request.id, JSON.stringify({ code }), getRequestIpAddress()],
       );
       await client.query('COMMIT');
       return request;
@@ -59,159 +61,98 @@ export const requestRepository = {
     }
   },
 
-  async listRecent(limit = 10, areaName = null, requestedBy = null) {
+  async listRecent(limit = 10, areaName = null) {
     const result = await pool.query(
       `SELECT r.id, r.code, d.name AS department, p.title AS position_title,
-              r.status, r.priority, r.required_by, r.created_at, u.display_name AS requested_by
+            r.status,
+            CASE r.priority::text
+              WHEN 'high' THEN 'Alta'
+              WHEN 'medium' THEN 'Media'
+              WHEN 'low' THEN 'Baja'
+            END AS priority,
+            r.required_by::text AS required_by,
+            r.application_deadline_original::text AS application_deadline_original,
+            r.application_deadline::text AS application_deadline,
+            r.created_at, u.display_name AS requested_by
        FROM coverage_requests r
        JOIN departments d ON d.id = r.department_id
        JOIN position_profiles p ON p.id = r.position_id
        JOIN users u ON u.id = r.requested_by
-       WHERE ($2::text IS NULL OR d.name = $2)
-         AND ($3::uuid IS NULL OR r.requested_by = $3)
+       WHERE ($2::text IS NULL OR lower(d.name) = lower($2))
        ORDER BY r.created_at DESC
        LIMIT $1`,
-      [limit, areaName, requestedBy],
+      [limit, areaName],
     );
     return result.rows;
   },
 
-  async listAll(areaName = null, requestedBy = null) {
+  async listAll(areaName = null) {
     const result = await pool.query(
       `SELECT r.id, r.code, r.department_id, r.position_id, d.name AS department,
-              p.title AS position_title, r.reason, r.status, r.priority, r.required_by, r.created_at,
+            p.title AS position_title, r.reason, r.status,
+            CASE r.priority::text
+              WHEN 'high' THEN 'Alta'
+              WHEN 'medium' THEN 'Media'
+              WHEN 'low' THEN 'Baja'
+            END AS priority,
+            r.required_by::text AS required_by,
+            r.application_deadline_original::text AS application_deadline_original,
+            r.application_deadline::text AS application_deadline,
+            r.application_documents,
+            r.created_at,
               r.reviewed_at, u.display_name AS requested_by
        FROM coverage_requests r
        JOIN departments d ON d.id = r.department_id
        JOIN position_profiles p ON p.id = r.position_id
        JOIN users u ON u.id = r.requested_by
-       WHERE ($1::text IS NULL OR d.name = $1)
-         AND ($2::uuid IS NULL OR r.requested_by = $2)
+       WHERE ($1::text IS NULL OR lower(d.name) = lower($1))
        ORDER BY r.created_at DESC`,
-      [areaName, requestedBy],
-    );
-    return result.rows;
-  },
-
-  async listCandidateRequests() {
-    const result = await pool.query(
-      `SELECT r.id, r.code, p.title AS position_title, r.priority, r.status
-       FROM coverage_requests r
-       JOIN position_profiles p ON p.id = r.position_id
-       WHERE r.status NOT IN ('rejected', 'completed')
-       ORDER BY r.created_at DESC`,
+      [areaName],
     );
     return result.rows;
   },
 
   async listPublicOpenings() {
     const result = await pool.query(
-      `SELECT r.id, r.code, d.name AS department, p.title AS position_title, p.description,
-              r.required_by
+      `SELECT r.id, r.code, p.title AS position_title, d.name AS department,
+              COALESCE(
+                (r.reviewed_at AT TIME ZONE 'America/Lima')::date,
+                (r.created_at AT TIME ZONE 'America/Lima')::date
+              )::text AS application_start_date,
+              r.application_deadline_original::text AS application_deadline_original,
+              r.application_deadline::text AS application_deadline,
+              r.application_documents,
+              p.description, p.education, p.general_experience, p.specific_experience,
+              p.technical_knowledge
        FROM coverage_requests r
        JOIN departments d ON d.id = r.department_id
        JOIN position_profiles p ON p.id = r.position_id
        WHERE r.status = 'approved'
-       ORDER BY r.created_at DESC`,
+         AND r.application_deadline >= CURRENT_DATE
+       ORDER BY r.updated_at DESC, p.title`,
     );
     return result.rows;
-  },
-
-  async createPublicApplication({
-    requestId,
-    fullName,
-    documentNumber,
-    email,
-    phone,
-    resumeName,
-    resumeContent,
-  }) {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const opening = await client.query(
-        `SELECT code FROM coverage_requests
-         WHERE id = $1 AND status = 'approved'
-         FOR SHARE`,
-        [requestId],
-      );
-      if (!opening.rowCount) {
-        throw new AppError(404, 'OPENING_NOT_AVAILABLE', 'La convocatoria ya no está disponible.');
-      }
-
-      const sequence = await client.query("SELECT nextval('public_application_code_seq') AS value");
-      const applicationCode = `POST-${String(sequence.rows[0].value).padStart(5, '0')}`;
-      const application = await client.query(
-        `INSERT INTO public_applications
-           (application_code, request_id, full_name, document_number, email, phone,
-            resume_name, resume_content)
-         VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8)
-           RETURNING application_code AS "applicationCode"`,
-        [applicationCode, requestId, fullName, documentNumber, email, phone, resumeName, resumeContent],
-      );
-      await client.query(
-        `INSERT INTO audit_events (event_type, resource_type, resource_id, metadata)
-         SELECT 'application.submitted', 'application', a.id, $2
-         FROM public_applications a
-         WHERE a.application_code = $1`,
-        [applicationCode, JSON.stringify({ applicationCode, requestCode: opening.rows[0].code })],
-      );
-      await client.query(
-        `INSERT INTO notifications (recipient_id, event_type, title, message, href)
-         SELECT id, 'application.submitted', 'Nueva postulación de prueba',
-                $1, '/candidatos-compatibles'
-         FROM users
-         WHERE role IN ('admin', 'hr_specialist') AND is_active = true`,
-        [`Se recibió la postulación ${applicationCode} para la convocatoria ${opening.rows[0].code}.`],
-      );
-      await client.query('COMMIT');
-      return application.rows[0];
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
   },
 
   async updateStatus(id, status, userId) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const requestOwner = await client.query(
-        'SELECT requested_by FROM coverage_requests WHERE id = $1 FOR UPDATE',
-        [id],
-      );
       const result = await client.query(
-        `UPDATE coverage_requests SET status = $2, reviewed_by = $3, reviewed_at = now(), updated_at = now()
+        `UPDATE coverage_requests SET status = $2::request_status, reviewed_by = $3, reviewed_at = now(), updated_at = now()
          WHERE id = $1 AND (
-           (status = 'pending' AND $2 IN ('in_review', 'approved', 'rejected')) OR
-           (status = 'in_review' AND $2 IN ('approved', 'rejected', 'pending'))
+           (status = 'pending' AND $2::request_status IN ('in_review', 'approved', 'rejected')) OR
+           (status = 'in_review' AND $2::request_status IN ('approved', 'rejected', 'pending'))
          )
          RETURNING id, code, status, updated_at`,
         [id, status, userId],
       );
       if (result.rowCount) {
         await client.query(
-          `INSERT INTO audit_events (actor_id, event_type, resource_type, resource_id, metadata)
-           VALUES ($1, 'coverage_request.status_changed', 'coverage_request', $2, $3)`,
-          [userId, result.rows[0].id, JSON.stringify({ status })],
+          `INSERT INTO audit_events (actor_id, event_type, resource_type, resource_id, metadata, ip_address)
+           VALUES ($1, 'coverage_request.status_changed', 'coverage_request', $2, $3, $4)`,
+          [userId, result.rows[0].id, JSON.stringify({ status }), getRequestIpAddress()],
         );
-        const ownerId = requestOwner.rows[0]?.requested_by;
-        if (ownerId && ownerId !== userId) {
-           const statusLabels = {
-             pending: 'Pendiente',
-             in_review: 'En revisión',
-             approved: 'Aprobada',
-             rejected: 'Rechazada',
-             completed: 'Completada',
-           };
-           await client.query(
-             `INSERT INTO notifications (recipient_id, event_type, title, message, href)
-              VALUES ($1, 'coverage_request.status_changed', 'Actualización de solicitud', $2, '/solicitudes-cobertura')`,
-             [ownerId, `La solicitud ${result.rows[0].code} ahora está ${statusLabels[status]}.`],
-           );
-        }
       }
       await client.query('COMMIT');
       return result.rows[0] ?? null;
@@ -223,7 +164,11 @@ export const requestRepository = {
     }
   },
 
-  async updatePending(id, { department, positionTitle, reason, requiredBy, priority }, userId) {
+  async updatePending(
+    id,
+    { department, positionTitle, reason, priority, requiredBy, applicationDeadline, applicationDocuments = [] },
+    userId,
+  ) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -239,20 +184,82 @@ export const requestRepository = {
       );
       const result = await client.query(
         `UPDATE coverage_requests SET department_id = $2, position_id = $3, reason = $4,
-           required_by = $5, priority = COALESCE($6, priority), updated_at = now()
+           priority = $5::request_priority, required_by = $6,
+           application_deadline_original = $7, application_deadline = $7,
+           application_documents = $8, updated_at = now()
          WHERE id = $1 AND status = 'pending'
          RETURNING id, code, status, updated_at`,
-        [id, departmentResult.rows[0].id, positionResult.rows[0].id, reason, requiredBy, priority ?? null],
+        [id, departmentResult.rows[0].id, positionResult.rows[0].id, reason, priorityToDatabase[priority],
+          requiredBy, applicationDeadline, JSON.stringify(applicationDocuments)],
       );
       if (result.rowCount) {
         await client.query(
-          `INSERT INTO audit_events (actor_id, event_type, resource_type, resource_id)
-           VALUES ($1, 'coverage_request.updated', 'coverage_request', $2)`,
-          [userId, id],
+          `INSERT INTO audit_events (actor_id, event_type, resource_type, resource_id, ip_address)
+           VALUES ($1, 'coverage_request.updated', 'coverage_request', $2, $3)`,
+          [userId, id, getRequestIpAddress()],
         );
       }
       await client.query('COMMIT');
       return result.rows[0] ?? null;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async extendApplicationDeadline(id, applicationDeadline, userId) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const current = await client.query(
+        `SELECT application_deadline::text AS application_deadline
+         FROM coverage_requests
+         WHERE id = $1 AND status = 'approved'
+         FOR UPDATE`,
+        [id],
+      );
+      if (!current.rowCount) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+
+      const previousDeadline = current.rows[0].application_deadline;
+      if (previousDeadline && applicationDeadline <= previousDeadline) {
+        throw new AppError(400, 'INVALID_APPLICATION_DEADLINE', 'La nueva fecha debe ser posterior a la fecha de cierre actual.');
+      }
+
+      const updated = await client.query(
+        `UPDATE coverage_requests
+         SET application_deadline_original = COALESCE(application_deadline_original, $2),
+             application_deadline = $2, updated_at = now()
+         WHERE id = $1
+         RETURNING id, application_deadline_original::text AS application_deadline_original,
+                   application_deadline::text AS application_deadline`,
+        [id, applicationDeadline],
+      );
+      if (previousDeadline) {
+        await client.query(
+          `INSERT INTO coverage_request_deadline_extensions
+             (request_id, previous_deadline, extended_deadline, extended_by)
+           VALUES ($1, $2, $3, $4)`,
+          [id, previousDeadline, applicationDeadline, userId],
+        );
+      }
+      await client.query(
+        `INSERT INTO audit_events (actor_id, event_type, resource_type, resource_id, metadata, ip_address)
+         VALUES ($1, $2, 'coverage_request', $3, $4, $5)`,
+        [
+          userId,
+          previousDeadline ? 'coverage_request.deadline_extended' : 'coverage_request.deadline_set',
+          id,
+          JSON.stringify({ previousDeadline, applicationDeadline }),
+          getRequestIpAddress(),
+        ],
+      );
+      await client.query('COMMIT');
+      return updated.rows[0];
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -284,9 +291,9 @@ export const requestRepository = {
         return null;
       }
       await client.query(
-        `INSERT INTO audit_events (actor_id, event_type, resource_type, resource_id, metadata)
-         VALUES ($1, 'coverage_request.deleted', 'coverage_request', $2, $3)`,
-        [userId, result.rows[0].id, JSON.stringify({ code: result.rows[0].code })],
+        `INSERT INTO audit_events (actor_id, event_type, resource_type, resource_id, metadata, ip_address)
+         VALUES ($1, 'coverage_request.deleted', 'coverage_request', $2, $3, $4)`,
+        [userId, result.rows[0].id, JSON.stringify({ code: result.rows[0].code }), getRequestIpAddress()],
       );
       await client.query('COMMIT');
       return result.rows[0];
@@ -299,42 +306,37 @@ export const requestRepository = {
   },
 
   async getDashboardSummary(areaName = null) {
+    if (areaName) {
+      const result = await pool.query(
+        `SELECT count(*) FILTER (WHERE status = 'pending')::int AS pending_requests,
+                0::int AS pending_validations,
+                0::int AS pending_evaluations,
+                0::int AS completed_assignments,
+                0::int AS pending_documents,
+                0::int AS pending_technical_evaluations,
+                count(*) FILTER (
+                  WHERE status IN ('pending', 'in_review')
+                    AND required_by BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
+                )::int AS expiring_requests
+         FROM coverage_requests r
+         JOIN departments d ON d.id = r.department_id
+         WHERE lower(d.name) = lower($1)`,
+        [areaName],
+      );
+      return result.rows[0];
+    }
     const result = await pool.query(`
-      WITH scoped_requests AS (
-        SELECT r.id, r.status, r.required_by
-        FROM coverage_requests r
-        JOIN departments d ON d.id = r.department_id
-        WHERE $1::text IS NULL OR d.name = $1
-      ),
-      scoped_documents AS (
-        SELECT dv.status
-        FROM document_validations dv
-        LEFT JOIN coverage_requests r ON r.id = dv.request_id
-        LEFT JOIN departments rd ON rd.id = r.department_id
-        LEFT JOIN workers w ON w.id = dv.worker_id
-        LEFT JOIN departments wd ON wd.id = w.department_id
-        WHERE $1::text IS NULL OR rd.name = $1 OR wd.name = $1
-      ),
-      scoped_evaluations AS (
-        SELECT te.status
-        FROM technical_evaluations te
-        LEFT JOIN coverage_requests r ON r.id = te.request_id
-        LEFT JOIN departments rd ON rd.id = r.department_id
-        LEFT JOIN workers w ON w.id = te.worker_id
-        LEFT JOIN departments wd ON wd.id = w.department_id
-        WHERE $1::text IS NULL OR rd.name = $1 OR wd.name = $1
-      )
       SELECT
-        (SELECT count(*)::int FROM scoped_requests WHERE status = 'pending') AS pending_requests,
-        (SELECT count(*)::int FROM scoped_documents WHERE status = 'pending') AS pending_validations,
-        (SELECT count(*)::int FROM scoped_evaluations WHERE status = 'pending') AS pending_evaluations,
-        (SELECT count(*)::int FROM assignments a JOIN scoped_requests r ON r.id = a.request_id) AS completed_assignments,
-        (SELECT count(*)::int FROM scoped_documents WHERE status = 'pending') AS pending_documents,
-        (SELECT count(*)::int FROM scoped_evaluations WHERE status = 'pending') AS pending_technical_evaluations,
-        (SELECT count(*)::int FROM scoped_requests
+        (SELECT count(*)::int FROM coverage_requests WHERE status = 'pending') AS pending_requests,
+        (SELECT count(*)::int FROM document_validations WHERE status = 'pending') AS pending_validations,
+        (SELECT count(*)::int FROM technical_evaluations WHERE status = 'pending') AS pending_evaluations,
+        (SELECT count(*)::int FROM assignments) AS completed_assignments,
+        (SELECT count(*)::int FROM document_validations WHERE status = 'pending') AS pending_documents,
+        (SELECT count(*)::int FROM technical_evaluations WHERE status = 'pending') AS pending_technical_evaluations,
+        (SELECT count(*)::int FROM coverage_requests
           WHERE status IN ('pending', 'in_review')
             AND required_by BETWEEN CURRENT_DATE AND CURRENT_DATE + 7) AS expiring_requests
-    `, [areaName]);
+    `);
     return result.rows[0];
   },
 };

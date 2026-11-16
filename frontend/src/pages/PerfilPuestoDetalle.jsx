@@ -1,622 +1,351 @@
 import React, { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import Sidebar from '../components/sidebar';
 import UserDropdown from '../components/UserDropdown';
-import { apiRequest } from '../lib/api';
+import { apiRequest } from '../services/api';
+import { useAuth } from '../auth/AuthContext';
 
-export default function PerfilPuestoDetalle({ profile: profileProp, onClose } = {}) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { id: routeProfileId } = useParams();
-  const [searchParams] = useSearchParams();
-  const profileId = profileProp?.id || routeProfileId || searchParams.get('id');
-  const profileFromNavigation = profileProp || location.state?.profile;
-  const isModal = Boolean(onClose);
-  
-  // Estado para controlar qué pestaña está activa
-  const [activeTab, setActiveTab] = useState('requisitos');
-  
-  // Estado para activar/desactivar el modo edición
-  const [modoEdicion, setModoEdicion] = useState(false);
-  const [datosPerfil, setDatosPerfil] = useState(null);
-  const [cargando, setCargando] = useState(true);
-  const [guardando, setGuardando] = useState(false);
-  const [error, setError] = useState('');
-  const [mensaje, setMensaje] = useState('');
+const splitLines = (value) => value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+const formatMoney = (value) => value == null
+  ? 'No especificada'
+  : `S/ ${Number(value).toLocaleString('es-PE', { minimumFractionDigits: 2 })}`;
+const tabs = [
+  { id: 'general', label: 'Información general' },
+  { id: 'requisitos', label: 'Requisitos y competencias' },
+  { id: 'responsabilidades', label: 'Responsabilidades' },
+];
 
-const convertirPerfil = (profile) => ({
-  id: profile.id,
-  puesto: profile.title || '',
-  area: profile.department || '',
-  nivel: profile.level || '',
-  codigo: profile.profile_code || profile.id || '',
-  remuneracion:
-    profile.reference_salary === null
-      ? ''
-      : String(profile.reference_salary ?? ''),
-  estado: profile.status === 'active' ? 'Activo' : 'Inactivo',
-  mision: profile.description || '',
-  reportaA: '',
-  supervisaA: '',
-  formacion: profile.principal_requirements || '',
-  formacionAcademica: profile.academic_formation || '',
-  experienciaGeneral: profile.general_experience || '',
-  experienciaEspecifica: profile.specific_experience || '',
-
-conocimientos: (() => {
-  const valor = profile.technical_knowledge;
-
-  if (Array.isArray(valor)) {
-    return valor
-      .map((item) => {
-        if (typeof item === 'string') {
-          const texto = item.trim();
-          try {
-            const objeto = JSON.parse(texto);
-            if (objeto && typeof objeto === 'object') {
-              return objeto.name || objeto.description || '';
-            }
-          } catch {
-          
-          }
-          return texto;
-        }
-        if (item && typeof item === 'object') {
-          return item.name || item.description || '';
-        }
-        return '';
-      })
-      .filter(Boolean);
-  }
-  if (typeof valor === 'string') {
-    try {
-      const objeto = JSON.parse(valor);
-
-      if (Array.isArray(objeto)) {
-        return objeto
-          .map((item) =>
-            typeof item === 'string'
-              ? item
-              : item?.name || item?.description || ''
-          )
-          .filter(Boolean);
-      }
-
-      if (objeto && typeof objeto === 'object') {
-        return [objeto.name || objeto.description || ''].filter(Boolean);
-      }
-    } catch {
-  
-    }
-    return valor
-      .split(/\r?\n|,\s*/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-  return [];
-})(),
-
-  funciones: Array.isArray(profile.responsibilities)
-    ? profile.responsibilities
-    : typeof profile.responsibilities === 'string'
-      ? profile.responsibilities.split('\n').filter(Boolean)
-      : [],
-
-  competencies: Array.isArray(profile.competencies)
-    ? profile.competencies
-    : [],
-});
-
-  const editarLista = (key, value) => {
-    setDatosPerfil({
-      ...datosPerfil,
-      [key]: value.split('\n'),
-    });
+function toForm(profile) {
+  return {
+    title: profile.title || '',
+    department: profile.department || '',
+    level: profile.level || '',
+    profileCode: profile.profile_code || '',
+    remuneration: profile.remuneration ?? '',
+    education: profile.education || '',
+    generalExperience: profile.general_experience || '',
+    specificExperience: profile.specific_experience || '',
+    technicalKnowledge: profile.technical_knowledge || '',
+    principalRequirements: profile.principal_requirements || '',
+    description: profile.description || '',
+    competencies: (profile.competencies || []).map(({ name }) => name).join('\n'),
+    functions: (profile.functions || []).join('\n'),
   };
+}
+
+function Field({ label, value, onChange, rows = 1, type = 'text', step }) {
+  const inputClass = 'mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm';
+  return (
+    <label className="block text-sm font-medium text-gray-700">
+      {label}
+      {rows > 1 ? (
+        <textarea className={inputClass} rows={rows} value={value} onChange={onChange} />
+      ) : (
+        <input className={inputClass} type={type} step={step} value={value} onChange={onChange} />
+      )}
+    </label>
+  );
+}
+
+function ReadField({ label, value, empty = 'No especificada' }) {
+  return (
+    <div>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</h3>
+      <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-gray-800">{value || empty}</p>
+    </div>
+  );
+}
+
+export default function PerfilPuestoDetalle() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const puedeEditar = ['admin', 'hr_specialist'].includes(user?.role);
+  const [profile, setProfile] = useState(null);
+  const [form, setForm] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [intentoCarga, setIntentoCarga] = useState(0);
+  const [tabActiva, setTabActiva] = useState('general');
 
   useEffect(() => {
-    let active = true;
-    setCargando(true);
-    setDatosPerfil(null);
+    let cancelled = false;
+    setLoading(true);
     setError('');
-
-    if (profileFromNavigation && (!profileId || String(profileFromNavigation.id) === String(profileId))) {
-      setDatosPerfil(convertirPerfil(profileFromNavigation));
-      setCargando(false);
-      return () => {
-        active = false;
-      };
-    }
-
-    if (!profileId) {
-      setError('No se indicó qué perfil se desea consultar.');
-      setCargando(false);
-      return () => {
-        active = false;
-      };
-    }
-
-    const cargarPerfil = async () => {
-      let profile;
-      try {
-        ({ profile } = await apiRequest(`/profiles/${encodeURIComponent(profileId)}`));
-      } catch (directRequestError) {
-        const { profiles } = await apiRequest('/profiles');
-        profile = profiles.find((item) => String(item.id) === profileId);
-        if (!profile) throw directRequestError;
-      }
-
-      if (!profile) throw new Error('No se encontró el perfil solicitado.');
-      return profile;
-    };
-
-    cargarPerfil()
-      .then((profile) => {
-        if (active) setDatosPerfil(convertirPerfil(profile));
+    apiRequest('/profiles', { timeoutMs: 15000 })
+      .then(({ profiles }) => {
+        const currentProfile = profiles.find((item) => item.id === id);
+        if (!currentProfile) throw new Error('No se encontró el perfil solicitado.');
+        if (cancelled) return;
+        setProfile(currentProfile);
+        setForm(toForm(currentProfile));
+        setError('');
       })
       .catch((requestError) => {
-        if (active) setError(requestError.message);
+        if (!cancelled) setError(requestError.message);
       })
       .finally(() => {
-        if (active) setCargando(false);
+        if (!cancelled) setLoading(false);
       });
+    return () => { cancelled = true; };
+  }, [id, intentoCarga]);
 
-    return () => {
-      active = false;
-    };
-  }, [profileFromNavigation, profileId]);
+  function updateField(name, value) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
 
-  useEffect(() => {
-    if (!isModal) return undefined;
-    const cerrarConEscape = (event) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', cerrarConEscape);
-    return () => window.removeEventListener('keydown', cerrarConEscape);
-  }, [isModal, onClose]);
-
-  const guardarPerfil = async () => {
-    if (!datosPerfil) return;
-    setGuardando(true);
+  async function saveProfile(event) {
+    event.preventDefault();
+    setSaving(true);
     setError('');
-    setMensaje('');
     try {
-      await apiRequest(`/profiles/${datosPerfil.id}`, {
+      const oldCompetencies = new Map((profile.competencies || []).map((competency) => [competency.name, competency.description]));
+      await apiRequest(`/profiles/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({
-          title: datosPerfil.puesto,
-          department: datosPerfil.area,
-          level: datosPerfil.nivel,
-          profileCode: datosPerfil.codigo,
-          referenceSalary: datosPerfil.remuneracion === '' ? null : Number(datosPerfil.remuneracion),
-          academicFormation: datosPerfil.formacionAcademica,
-          generalExperience: datosPerfil.experienciaGeneral,
-          specificExperience: datosPerfil.experienciaEspecifica,
-          technicalKnowledge: datosPerfil.conocimientos.filter((item) => item.trim()),
-          responsibilities: datosPerfil.funciones.filter((item) => item.trim()),
-          principalRequirements: datosPerfil.formacion,
-          description: datosPerfil.mision,
-          status: datosPerfil.estado === 'Activo' ? 'active' : 'inactive',
-          competencies: datosPerfil.competencies,
+          title: form.title,
+          department: form.department,
+          level: form.level,
+          profileCode: form.profileCode,
+          remuneration: form.remuneration,
+          education: form.education,
+          generalExperience: form.generalExperience,
+          specificExperience: form.specificExperience,
+          technicalKnowledge: form.technicalKnowledge,
+          principalRequirements: form.principalRequirements,
+          description: form.description,
+          status: profile.status,
+          competencies: splitLines(form.competencies).map((name) => ({
+            name,
+            description: oldCompetencies.get(name) || '',
+          })),
+          functions: splitLines(form.functions),
         }),
       });
-      setModoEdicion(false);
-      setMensaje('Perfil actualizado.');
+      const { profiles } = await apiRequest('/profiles');
+      const updatedProfile = profiles.find((item) => item.id === id);
+      setProfile(updatedProfile);
+      setForm(toForm(updatedProfile));
+      setEditing(false);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
-      setGuardando(false);
+      setSaving(false);
     }
-  };
-
-  if (cargando) {
-    const loading = <p role="status" className="p-8 text-sm text-gray-600">Cargando perfil…</p>;
-    return isModal ? createPortal(
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-3 sm:p-6">
-        <section role="dialog" aria-modal="true" aria-label="Ficha del puesto" className="w-full max-w-4xl rounded-xl bg-white shadow-2xl">
-          {loading}
-        </section>
-      </div>,
-      document.body,
-    ) : loading;
-  }
-  if (!datosPerfil) {
-    const errorContent = (
-      <main className="p-8 space-y-4">
-        <p role="alert" className="text-sm text-red-700">{error || 'No se encontró el perfil solicitado.'}</p>
-        {isModal
-          ? <button onClick={onClose} className="text-sm text-blue-900 underline">Cerrar</button>
-          : <button onClick={() => navigate('/perfil-puesto')} className="text-sm text-blue-900 underline">Volver a perfiles</button>}
-      </main>
-    );
-    return isModal ? createPortal(
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-3 sm:p-6">
-        <section role="dialog" aria-modal="true" aria-label="Ficha del puesto" className="w-full max-w-4xl rounded-xl bg-white shadow-2xl">
-          {errorContent}
-        </section>
-      </div>,
-      document.body,
-    ) : errorContent;
   }
 
-  const profileContent = (
-        <main className={`${isModal ? 'p-4 sm:p-6' : 'p-8'} space-y-6`}>
-          {!isModal && (
-            <button
-              onClick={() => navigate('/perfil-puesto')}
-              className="text-xs font-semibold text-gray-500 hover:text-blue-900 flex items-center gap-1 transition-colors">
-              ← Volver a la lista
+  const competencies = profile?.competencies || [];
+  const functions = profile?.functions || [];
+  const requisitos = [
+    { label: 'Formación académica', value: profile?.education },
+    { label: 'Experiencia general', value: profile?.general_experience },
+    { label: 'Experiencia específica', value: profile?.specific_experience },
+    { label: 'Conocimientos técnicos', value: profile?.technical_knowledge },
+    { label: 'Otros requisitos', value: profile?.principal_requirements },
+  ];
+
+  return (
+    <div className="app-shell flex h-dvh flex-col bg-gray-100 font-sans text-gray-800 md:flex-row">
+      <Sidebar />
+      <div className="min-h-0 min-w-0 flex-1 flex flex-col overflow-y-auto">
+        <header className="flex items-center justify-between border-b bg-white px-4 py-3 sm:px-8">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-blue-950">SIPEC-MLA</h1>
+            <span className="hidden rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 sm:inline">Perfil del puesto</span>
+          </div>
+          <UserDropdown />
+        </header>
+
+        <main className="mx-auto w-full max-w-7xl space-y-5 p-4 sm:p-8">
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" onClick={() => navigate('/perfil-puesto')} className="text-sm font-semibold text-blue-900 hover:underline">
+              ← Volver a perfiles
             </button>
-          )}
-
-          {/* Header y botón de Edición */}
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <h2 className="text-2xl font-bold text-gray-900">{datosPerfil.puesto}</h2>
-                <span className="bg-green-100 text-green-700 text-xs font-semibold px-2.5 py-0.5 rounded-full">
-                  {datosPerfil.estado}
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 mt-0.5">Área: {datosPerfil.area}</p>
-            </div>
-
-            {/* Botones para editar */}
-            <div className="flex gap-2">
-              <button 
-                onClick={() => setModoEdicion(!modoEdicion)}
-                className={`text-xs font-semibold px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 ${
-                  modoEdicion 
-                    ? 'bg-amber-500 hover:bg-amber-600 text-white' 
-                    : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-                }`} >
-                {modoEdicion ? '🔓 Modo Edición Activo' : '✏️ Editar Perfil'}
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">04. Perfil del puesto</span>
+          </div>
+          {error && (
+            <div role="alert" className="rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-700">
+              <p>{error}</p>
+              <button type="button" onClick={() => setIntentoCarga((intento) => intento + 1)} className="mt-2 font-semibold underline">
+                Reintentar
               </button>
-              {modoEdicion && (
-                <button 
-                  onClick={guardarPerfil}
-                  disabled={guardando}
-                  className="text-xs font-semibold px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors" >
-                  {guardando ? 'Guardando…' : '💾 Guardar'}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-          {mensaje && <p role="status" className="text-sm text-emerald-700">{mensaje}</p>}
-
-          {/* Pestañas de Navegación */}
-          <div className="border-b border-gray-200 flex gap-8 text-sm">
-            <button 
-              onClick={() => setActiveTab('general')}
-              className={`pb-3 font-medium transition-all ${
-                activeTab === 'general' 
-                  ? 'border-b-2 border-blue-900 text-blue-950 font-semibold' 
-                  : 'text-gray-400 hover:text-gray-600'
-              }`} >
-              Información general
-            </button>
-            <button 
-              onClick={() => setActiveTab('requisitos')}
-              className={`pb-3 font-medium transition-all ${
-                activeTab === 'requisitos' 
-                  ? 'border-b-2 border-blue-900 text-blue-950 font-semibold' 
-                  : 'text-gray-400 hover:text-gray-600'
-              }`}>
-              Requisitos y competencias
-            </button>
-            <button 
-              onClick={() => setActiveTab('responsabilidades')}
-              className={`pb-3 font-medium transition-all ${
-                activeTab === 'responsabilidades' 
-                  ? 'border-b-2 border-blue-900 text-blue-950 font-semibold' 
-                  : 'text-gray-400 hover:text-gray-600'
-              }`} >
-              Responsabilidades
-            </button>
-          </div>
-
-          {/* secciones de navegacion segun activacion */}
-
-          {/* Informacion general */}
-          {activeTab === 'general' && (
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-5">
-              <h3 className="font-bold text-gray-800 text-sm border-b pb-2">Estructura Organizacional y Datos del Puesto</h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 text-xs">
-                <div>
-                  <label className="font-semibold text-gray-600 block">Código del Puesto:</label>
-                  {modoEdicion ? (
-                    <input value={datosPerfil.codigo} onChange={(event) => setDatosPerfil({ ...datosPerfil, codigo: event.target.value })}
-                      className="w-full text-gray-800 mt-1 bg-white p-2 rounded border border-amber-400" />
-                  ) : (
-                    <p className="text-gray-800 font-medium mt-1 bg-gray-50 p-2 rounded border">{datosPerfil.codigo}</p>
-                  )}
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-600 block">Nivel Organizacional:</label>
-                  {modoEdicion ? (
-                    <input value={datosPerfil.nivel} onChange={(event) => setDatosPerfil({ ...datosPerfil, nivel: event.target.value })}
-                      className="w-full text-gray-800 mt-1 bg-white p-2 rounded border border-amber-400" />
-                  ) : (
-                    <p className="text-gray-800 font-medium mt-1 bg-gray-50 p-2 rounded border">{datosPerfil.nivel}</p>
-                  )}
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-600 block">Unidad Orgánica:</label>
-                  <p className="text-gray-800 font-medium mt-1 bg-gray-50 p-2 rounded border">{datosPerfil.area}</p>
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-600 block">Remuneración Referencial:</label>
-                  {modoEdicion ? (
-                    <input type="number" min="0" step="0.01" value={datosPerfil.remuneracion}
-                      onChange={(event) => setDatosPerfil({ ...datosPerfil, remuneracion: event.target.value })}
-                      className="w-full text-gray-800 mt-1 bg-white p-2 rounded border border-amber-400" />
-                  ) : (
-                    <p className="text-gray-800 font-medium mt-1 bg-gray-50 p-2 rounded border">
-                      {datosPerfil.remuneracion === '' ? 'No registrada' : `S/ ${Number(datosPerfil.remuneracion).toLocaleString('es-PE', { minimumFractionDigits: 2 })}`}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2">
-                <div>
-                  <label className="font-semibold text-gray-600 block">Dependencia Jerárquica (Reporta a):</label>
-                  <p className="text-gray-800 font-medium mt-1 bg-gray-50 p-2 rounded border">{datosPerfil.reportaA || 'No registrado'}</p>
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-600 block">Personal a Cargo (Supervisa a):</label>
-                  <p className="text-gray-800 font-medium mt-1 bg-gray-50 p-2 rounded border">{datosPerfil.supervisaA || 'No registrado'}</p>
-                </div>
-              </div>
-
-              <div className="text-xs pt-2">
-                <label className="font-semibold text-gray-600 block mb-1">Misión del Puesto:</label>
-                {modoEdicion ? (
-                  <textarea 
-                    value={datosPerfil.mision}
-                    onChange={(e) => setDatosPerfil({...datosPerfil, mision: e.target.value})}
-                    className="w-full border border-amber-400 p-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs"
-                    rows={3}
-                  />
-                ) : (
-                  <p className="text-gray-700 bg-blue-50/50 p-3 rounded-lg border border-blue-100 leading-relaxed">
-                    {datosPerfil.mision}
-                  </p>
-                )}
-              </div>
             </div>
           )}
-
-          {/* Requisitos y Competencias */}
-          {activeTab === 'requisitos' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Columna de Requisitos */}
-              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-5">
-                <h3 className="font-bold text-gray-800 text-sm border-b pb-2">Requisitos Mínimos Exigidos</h3>
-
-                <div className="space-y-4 text-xs">
-                  <div>
-                    <div className="flex items-center gap-2 font-semibold text-gray-700">
-                      <span>🎓</span> Formación académica
+          {loading && <p className="rounded-lg bg-white p-6 text-sm text-gray-500">Cargando ficha...</p>}
+          {!loading && profile && form && (
+            <form onSubmit={saveProfile} className="space-y-5">
+              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+                <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-3">
+                      {editing ? (
+                        <input aria-label="Nombre del puesto" required value={form.title} onChange={(event) => updateField('title', event.target.value)} className="w-full max-w-xl rounded-lg border border-gray-300 p-2 text-xl font-bold" />
+                      ) : (
+                        <h2 className="text-xl font-bold text-gray-900 sm:text-2xl">{profile.title}</h2>
+                      )}
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${profile.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}>
+                        {profile.status === 'active' ? 'Activo' : 'Inactivo'}
+                      </span>
                     </div>
-                    {modoEdicion ? (
-                      <textarea rows={3} value={datosPerfil.formacionAcademica}
-                        onChange={(event) => setDatosPerfil({ ...datosPerfil, formacionAcademica: event.target.value })}
-                        className="w-full mt-1 border border-amber-400 p-2 rounded focus:outline-none text-xs" />
+                    {editing ? (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <Field label="Área / unidad orgánica" value={form.department} onChange={(event) => updateField('department', event.target.value)} />
+                        <Field label="Código del perfil" value={form.profileCode} onChange={(event) => updateField('profileCode', event.target.value)} />
+                      </div>
                     ) : (
-                      <p className="text-gray-600 mt-1 pl-6">{datosPerfil.formacionAcademica || datosPerfil.formacion || 'No registrada.'}</p>
+                      <p className="mt-1 text-sm text-gray-500">{profile.department}{profile.profile_code ? ` · ${profile.profile_code}` : ''}</p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    {editing && puedeEditar ? (
+                      <>
+                        <button type="button" onClick={() => { setForm(toForm(profile)); setEditing(false); }} className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50">Cancelar</button>
+                        <button type="submit" disabled={saving} className="rounded-lg bg-blue-950 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-900 disabled:bg-gray-400">{saving ? 'Guardando...' : 'Guardar cambios'}</button>
+                      </>
+                    ) : puedeEditar ? (
+                      <button type="button" onClick={() => setEditing(true)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">Editar perfil</button>
+                    ) : null}
+                  </div>
+                </div>
+              </section>
+
+              <nav role="tablist" aria-label="Secciones del perfil" className="flex gap-1 overflow-x-auto border-b border-gray-200">
+                {tabs.map(({ id: tabId, label }) => (
+                  <button
+                    key={tabId}
+                    type="button"
+                    role="tab"
+                    aria-selected={tabActiva === tabId}
+                    onClick={() => setTabActiva(tabId)}
+                    className={`shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+                      tabActiva === tabId
+                        ? 'border-blue-900 text-blue-950'
+                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+
+              {tabActiva === 'general' && (
+                <section className="grid items-start gap-5 lg:grid-cols-2">
+                  <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+                    <h3 className="text-base font-bold text-gray-900">Requisitos mínimos</h3>
+                    <p className="mt-1 text-xs text-gray-500">Condiciones necesarias para desempeñar el puesto.</p>
+                    {editing ? (
+                      <div className="mt-5 space-y-4">
+                        <Field label="Formación académica" rows={2} value={form.education} onChange={(event) => updateField('education', event.target.value)} />
+                        <Field label="Experiencia general" rows={2} value={form.generalExperience} onChange={(event) => updateField('generalExperience', event.target.value)} />
+                        <Field label="Experiencia específica" rows={2} value={form.specificExperience} onChange={(event) => updateField('specificExperience', event.target.value)} />
+                        <Field label="Conocimientos técnicos" rows={3} value={form.technicalKnowledge} onChange={(event) => updateField('technicalKnowledge', event.target.value)} />
+                        <Field label="Otros requisitos" rows={2} value={form.principalRequirements} onChange={(event) => updateField('principalRequirements', event.target.value)} />
+                      </div>
+                    ) : (
+                      <div className="mt-4 divide-y divide-gray-100">
+                        {requisitos.map(({ label, value }) => (
+                          <div key={label} className="flex gap-3 py-3 first:pt-1 last:pb-1">
+                            <span aria-hidden="true" className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-900">✓</span>
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-semibold text-gray-800">{label}</h4>
+                              <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-gray-600">{value || 'No especificado.'}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
 
-                  <div>
-                    <label className="font-semibold text-gray-700 block">Experiencia general</label>
-                    {modoEdicion ? (
-                      <textarea rows={2} value={datosPerfil.experienciaGeneral}
-                        onChange={(event) => setDatosPerfil({ ...datosPerfil, experienciaGeneral: event.target.value })}
-                        className="w-full mt-1 border border-amber-400 p-2 rounded text-xs" />
-                    ) : <p className="mt-1 text-gray-600">{datosPerfil.experienciaGeneral || 'No registrada.'}</p>}
-                  </div>
-
-                  <div>
-                    <label className="font-semibold text-gray-700 block">Experiencia específica</label>
-                    {modoEdicion ? (
-                      <textarea rows={2} value={datosPerfil.experienciaEspecifica}
-                        onChange={(event) => setDatosPerfil({ ...datosPerfil, experienciaEspecifica: event.target.value })}
-                        className="w-full mt-1 border border-amber-400 p-2 rounded text-xs" />
-                    ) : <p className="mt-1 text-gray-600">{datosPerfil.experienciaEspecifica || 'No registrada.'}</p>}
-                  </div>
-
-                  <div>
-                    <label className="font-semibold text-gray-700 block">Conocimientos técnicos / certificaciones</label>
-                    {modoEdicion ? (
-                      <textarea rows={5} value={datosPerfil.conocimientos.join('\n')}
-                        onChange={(event) => editarLista('conocimientos', event.target.value)}
-                        className="w-full mt-1 border border-amber-400 p-2 rounded text-xs"
-                        placeholder="Un requisito por línea" />
-                    ) : datosPerfil.conocimientos.length ? (
-                      <ul className="mt-1 list-disc space-y-1 pl-5 text-gray-600">
-                        {datosPerfil.conocimientos.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+                  <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+                    <h3 className="text-base font-bold text-gray-900">Competencias requeridas</h3>
+                    <p className="mt-1 text-xs text-gray-500">Habilidades y capacidades asociadas al puesto.</p>
+                    {editing ? (
+                      <div className="mt-5 space-y-4">
+                        <Field label="Competencias (una por línea)" rows={7} value={form.competencies} onChange={(event) => updateField('competencies', event.target.value)} />
+                        <Field label="Nivel / grupo" value={form.level} onChange={(event) => updateField('level', event.target.value)} />
+                        <Field label="Remuneración referencial (S/)" type="number" step="0.01" value={form.remuneration} onChange={(event) => updateField('remuneration', event.target.value)} />
+                      </div>
+                    ) : competencies.length ? (
+                      <ul className="mt-4 divide-y divide-gray-100">
+                        {competencies.map(({ id: competencyId, name, description }) => (
+                          <li key={competencyId || name} className="flex items-start justify-between gap-3 py-3 first:pt-1 last:pb-1">
+                            <div className="flex min-w-0 gap-3">
+                              <span aria-hidden="true" className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-bold text-emerald-700">✓</span>
+                              <div>
+                                <span className="text-sm font-medium text-gray-800">{name}</span>
+                                {description && <p className="mt-1 text-xs leading-relaxed text-gray-500">{description}</p>}
+                              </div>
+                            </div>
+                            <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">Requerida</span>
+                          </li>
+                        ))}
                       </ul>
-                    ) : <p className="mt-1 text-gray-500">No registrados.</p>}
+                    ) : <p className="mt-5 rounded-lg bg-gray-50 p-4 text-sm text-gray-500">No se registraron competencias para este puesto.</p>}
+                    {!editing && (
+                      <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-xs leading-relaxed text-blue-900">
+                        Nivel / grupo del puesto: <span className="font-semibold">{profile.level || 'No especificado'}</span>
+                      </div>
+                    )}
                   </div>
-                </div>
-              </div>
-
-             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
-  <h3 className="font-bold text-gray-800 text-sm border-b pb-2">
-    Competencias Requeridas
-  </h3>
-
-  <div className="space-y-3 text-xs">
-    {datosPerfil.competencies.map((competency, index) => (
-      <div
-        key={competency.id || index}
-        className="py-2 border-b border-gray-100" >
-        {modoEdicion ? (
-          <div className="space-y-2">
-            <input
-              type="text"
-              value={competency.name || ''}
-              onChange={(event) => {
-                const nuevasCompetencias = [...datosPerfil.competencies];
-                nuevasCompetencias[index] = {
-                  ...competency,
-                  name: event.target.value,
-                };
-
-                setDatosPerfil({
-                  ...datosPerfil,
-                  competencies: nuevasCompetencias,
-                });
-              }}
-              placeholder="Nombre de la competencia"
-              className="w-full border border-amber-400 p-2 rounded text-xs" />
-
-            <textarea
-              rows={2}
-              value={competency.description || ''}
-              onChange={(event) => {
-                const nuevasCompetencias = [...datosPerfil.competencies];
-                nuevasCompetencias[index] = {
-                  ...competency,
-                  description: event.target.value,
-                };
-
-                setDatosPerfil({
-                  ...datosPerfil,
-                  competencies: nuevasCompetencias,
-                });
-              }}
-              placeholder="Descripción de la competencia"
-              className="w-full border border-amber-400 p-2 rounded text-xs" />
-
-            <button
-              type="button"
-              onClick={() => {
-                setDatosPerfil({
-                  ...datosPerfil,
-                  competencies: datosPerfil.competencies.filter(
-                    (_, i) => i !== index
-                  ),
-                });
-              }}
-              className="text-red-600 hover:underline font-semibold" >
-              Eliminar competencia
-            </button>
-          </div>
-        ) : (
-          <>
-            <p className="text-gray-700 font-medium">
-              🎯 {competency.name}
-            </p>
-
-            {competency.description && (
-              <p className="mt-1 text-gray-500">
-                {competency.description}
-              </p>
-            )}
-          </>
-        )}
-      </div>
-    ))}
-
-    {datosPerfil.competencies.length === 0 && (
-      <p className="text-gray-500">
-        No hay competencias registradas para este perfil.
-      </p>
-    )}
-  </div>
-
-  {modoEdicion && (
-    <button
-      type="button"
-      onClick={() => {
-        setDatosPerfil({
-          ...datosPerfil,
-          competencies: [
-            ...datosPerfil.competencies,
-            { name: '', description: '' },
-          ],
-        });
-      }}
-      className="text-xs font-semibold text-blue-900 hover:underline">
-      + Agregar competencia
-    </button>
-  )}
-                <div className="pt-2 text-[11px] text-gray-500 italic">
-                  Las competencias y descripciones se obtienen del registro del perfil.
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Responsanilidades*/}
-          {activeTab === 'responsabilidades' && (
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
-              <h3 className="font-bold text-gray-800 text-sm border-b pb-2">Funciones principales</h3>
-              {modoEdicion ? (
-                <textarea rows={10} value={datosPerfil.funciones.join('\n')}
-                  onChange={(event) => editarLista('funciones', event.target.value)}
-                  className="w-full border border-amber-400 p-2 rounded text-xs"
-                  placeholder="Una función por línea" />
-              ) : datosPerfil.funciones.length ? (
-                <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-gray-700">
-                  {datosPerfil.funciones.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
-                </ol>
-              ) : (
-                <p className="text-gray-500 text-sm">No hay funciones registradas para este perfil.</p>
+                </section>
               )}
-            </div>
+
+              {tabActiva === 'requisitos' && (
+                <section className="grid items-start gap-5 lg:grid-cols-2">
+                  <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+                    <h3 className="text-base font-bold text-gray-900">Datos del perfil</h3>
+                    <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                      {editing ? (
+                        <>
+                          <Field label="Código del perfil" value={form.profileCode} onChange={(event) => updateField('profileCode', event.target.value)} />
+                          <Field label="Nivel / grupo" value={form.level} onChange={(event) => updateField('level', event.target.value)} />
+                          <div className="sm:col-span-2"><Field label="Remuneración referencial (S/)" type="number" step="0.01" value={form.remuneration} onChange={(event) => updateField('remuneration', event.target.value)} /></div>
+                        </>
+                      ) : (
+                        <>
+                          <ReadField label="Código" value={profile.profile_code} />
+                          <ReadField label="Nivel / grupo" value={profile.level} />
+                          <ReadField label="Remuneración referencial" value={profile.remuneration == null ? '' : formatMoney(profile.remuneration)} />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+                    <h3 className="text-base font-bold text-gray-900">Descripción del puesto</h3>
+                    <div className="mt-4">
+                      {editing
+                        ? <Field label="Misión / descripción" rows={6} value={form.description} onChange={(event) => updateField('description', event.target.value)} />
+                        : <ReadField label="Misión / descripción" value={profile.description} />}
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {tabActiva === 'responsabilidades' && (
+                <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+                  <h3 className="text-base font-bold text-gray-900">Responsabilidades</h3>
+                  <p className="mt-1 text-xs text-gray-500">Funciones principales asignadas al puesto.</p>
+                  {editing ? (
+                    <div className="mt-5">
+                      <Field label="Funciones principales (una por línea)" rows={10} value={form.functions} onChange={(event) => updateField('functions', event.target.value)} />
+                    </div>
+                  ) : functions.length ? (
+                    <ol className="mt-5 space-y-3">
+                      {functions.map((item, index) => (
+                        <li key={`${item}-${index}`} className="flex gap-3 rounded-lg bg-gray-50 p-3 text-sm leading-relaxed text-gray-700">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-900">{index + 1}</span>
+                          {item}
+                        </li>
+                      ))}
+                    </ol>
+                  ) : <p className="mt-5 rounded-lg bg-gray-50 p-4 text-sm text-gray-500">No se registraron responsabilidades para este puesto.</p>}
+                </section>
+              )}
+            </form>
           )}
-
         </main>
-  );
-
-  if (isModal) {
-    return createPortal(
-      <div
-        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm sm:p-6"
-        onClick={(event) => {
-          if (event.target === event.currentTarget) onClose();
-        }} >
-        <section
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Ficha del puesto ${datosPerfil.puesto}`}
-          className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-gray-100 text-gray-800 shadow-2xl" >
-          <header className="flex items-center justify-between border-b bg-white px-5 py-3 sm:px-7">
-            <h1 className="text-lg font-bold text-blue-950">Ficha completa del puesto</h1>
-            <button
-              type="button"
-              aria-label="Cerrar ficha"
-              onClick={onClose}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-lg leading-none text-gray-600 hover:bg-gray-100" >
-              ×
-            </button>
-          </header>
-          <div className="min-h-0 overflow-y-auto">{profileContent}</div>
-        </section>
-      </div>,
-      document.body,
-    );
-  }
-
-  return (
-    <div className="flex h-screen bg-gray-100 text-gray-800 font-sans">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-y-auto">
-        <header className="bg-white border-b px-8 py-3 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-blue-950">SIPEC-MLA</h1>
-          <div className="flex items-center gap-4">
-            <button className="text-gray-400 hover:text-gray-600">🔔</button>
-            <UserDropdown />
-          </div>
-        </header>
-        {profileContent}
       </div>
     </div>
   );

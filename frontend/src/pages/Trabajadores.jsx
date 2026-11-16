@@ -1,18 +1,30 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/sidebar';
 import UserDropdown from '../components/UserDropdown';
+import { apiRequest } from '../services/api';
 
 export default function Trabajadores() {
   const navigate = useNavigate();
   const [busqueda, setBusqueda] = useState('');
+  const [trabajadores, setTrabajadores] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState('');
 
-  const [trabajadores] = useState([
-    { id: 'TR-402', dni: '45892103', nombre: 'Juan Carlos Mendoza', gerencia: 'Gerencia de Administración Tributaria', puesto: 'Auxiliar de Fiscalización', condicion: 'CAS', estado: 'Activo' },
-    { id: 'TR-108', dni: '70123984', nombre: 'Ana María Torres', gerencia: 'Gerencia de Desarrollo Territorial e Infraestructura', puesto: 'Inspector de Transporte', condicion: 'Nombrado', estado: 'Activo' },
-    { id: 'TR-215', dni: '41982301', nombre: 'Roberto Gómez Silva', gerencia: 'Gerencia de Servicios Municipales y Gestión Ambiental', puesto: 'Sereno Operativo', condicion: 'CAS', estado: 'Activo' },
-    { id: 'TR-301', dni: '10928374', nombre: 'Lucía Fernández Quispe', gerencia: 'Oficina de Administración y Finanzas', puesto: 'Especialista en RRHH', condicion: '728', estado: 'Licencia' },
-  ]);
+  useEffect(() => {
+    apiRequest('/workers')
+      .then(({ workers }) => setTrabajadores(workers.map((worker) => ({
+        id: worker.employee_number,
+        dni: worker.document_number,
+        nombre: worker.full_name,
+        gerencia: worker.department,
+        puesto: worker.position || 'Sin puesto asignado',
+        condicion: 'No especificada',
+        estado: worker.status === 'active' ? 'Activo' : 'Inactivo',
+      }))))
+      .catch((requestError) => setError(requestError.message))
+      .finally(() => setCargando(false));
+  }, []);
 
   const filtrados = trabajadores.filter(t => 
     t.nombre.toLowerCase().includes(busqueda.toLowerCase()) || 
@@ -21,11 +33,11 @@ export default function Trabajadores() {
   );
 
   return (
-    <div className="flex h-screen bg-gray-100 text-gray-800 font-sans">
+    <div className="app-shell flex h-dvh flex-col bg-gray-100 font-sans text-gray-800 md:flex-row">
       <Sidebar />
 
-      <div className="flex-1 flex flex-col overflow-y-auto">
-        <header className="bg-white border-b px-8 py-3 flex justify-between items-center">
+      <div className="min-h-0 min-w-0 flex-1 flex flex-col overflow-y-auto">
+        <header className="bg-white border-b px-4 py-3 flex justify-between items-center gap-3 sm:px-8">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold text-blue-950">SIPEC-MLA</h1>
             <span className="text-xs bg-blue-100 text-blue-800 font-medium px-2.5 py-0.5 rounded-full">
@@ -36,7 +48,10 @@ export default function Trabajadores() {
         </header>
 
         <main className="p-8 space-y-6">
-          <div className="flex justify-between items-center border-b pb-4">
+          {error && (
+            <div role="alert" className="rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+          )}
+          <div className="flex flex-col justify-between gap-4 border-b pb-4 sm:flex-row sm:items-center">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Directorio de Trabajadores</h2>
               <p className="text-xs text-gray-500">Registro unificado del personal de la Municipalidad Distrital de Los Aquijes</p>
@@ -53,7 +68,7 @@ export default function Trabajadores() {
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+          <div className="overflow-x-auto bg-white p-4 rounded-xl border border-gray-200 shadow-sm sm:p-5">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="text-gray-400 border-b pb-2">
@@ -97,6 +112,12 @@ export default function Trabajadores() {
                     </td>
                   </tr>
                 ))}
+                {!cargando && filtrados.length === 0 && (
+                  <tr><td colSpan="8" className="py-6 text-center text-gray-500">
+                    {error ? 'No se pudieron cargar los trabajadores.' : 'No hay trabajadores registrados.'}
+                  </td></tr>
+                )}
+                {cargando && <tr><td colSpan="8" className="py-6 text-center text-gray-500">Cargando trabajadores...</td></tr>}
               </tbody>
             </table>
           </div>

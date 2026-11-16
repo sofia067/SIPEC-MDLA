@@ -15,8 +15,6 @@ services:
         fromDatabase:
           name: sipec-mla-db
           property: connectionString
-      - key: UPLOADS_DIR
-        value: /tmp/sipec-mla-uploads
       - key: OCR_LANGUAGES
         value: spa+eng
       - key: ADMIN_USERNAME
@@ -24,6 +22,8 @@ services:
       - key: ADMIN_DISPLAY_NAME
         value: Administrador SIPEC
       - key: ADMIN_PASSWORD
+        sync: false
+      - key: AREA_MANAGER_AREA
         sync: false
       - key: AREA_MANAGER_PASSWORD
         sync: false

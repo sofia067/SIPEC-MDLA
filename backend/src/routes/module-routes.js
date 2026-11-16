@@ -5,10 +5,18 @@ import { authenticate } from '../middleware/authenticate.js';
 import { authorize } from '../middleware/authorize.js';
 import { uploadDocument } from '../middleware/upload.js';
 import { modulesRepository } from '../repositories/modules-repository.js';
-import { notificationRepository } from '../repositories/notification-repository.js';
 import { requestRepository } from '../repositories/request-repository.js';
 import { hashPassword } from '../security/password.js';
 import { documentService } from '../services/document-service.js';
+import { extractPdfMetadata, extractText } from '../services/ocr-service.js';
+import { assessDocumentReview } from '../services/document-review.js';
+import { scoreResumeMatch } from '../services/match-scoring.js';
+import {
+  assessResumeTextQuality,
+  redactCandidateDocumentText,
+} from '../services/resume-review.js';
+import { applicationDocumentsSchema } from '../services/application-documents.js';
+import { getAreaScope } from '../middleware/role-scope.js';
 
 const idSchema = z.uuid();
 const nonEmptyText = (max) => z.string().trim().min(1).max(max);
@@ -30,15 +38,15 @@ const profileSchema = z.object({
   title: nonEmptyText(160),
   department: nonEmptyText(160),
   level: nonEmptyText(80),
-  profileCode: z.string().trim().max(32).optional().default(''),
-  referenceSalary: z.number().min(0).max(99999999.99).nullable().optional(),
-  academicFormation: z.string().trim().max(4000).optional().default(''),
-  generalExperience: z.string().trim().max(1000).optional().default(''),
-  specificExperience: z.string().trim().max(1000).optional().default(''),
-  technicalKnowledge: z.array(nonEmptyText(1000)).max(30).optional().default([]),
-  responsibilities: z.array(nonEmptyText(2000)).max(30).optional().default([]),
   principalRequirements: z.string().trim().max(4000).default(''),
   description: z.string().trim().max(4000).default(''),
+  profileCode: z.string().trim().max(40).default(''),
+  remuneration: z.union([z.literal(''), z.coerce.number().min(0).max(9999999999.99)]).optional().transform((value) => value === '' ? null : value),
+  education: z.string().trim().max(4000).default(''),
+  generalExperience: z.string().trim().max(2000).default(''),
+  specificExperience: z.string().trim().max(2000).default(''),
+  technicalKnowledge: z.string().trim().max(8000).default(''),
+  functions: z.array(nonEmptyText(2000)).max(60).default([]),
   status: z.enum(['active', 'inactive']).default('active'),
   competencies: z.array(competencySchema).max(30).default([]),
 });
@@ -49,31 +57,31 @@ const requestDetailsSchema = z.object({
   department: nonEmptyText(160),
   positionTitle: nonEmptyText(160),
   reason: z.string().trim().min(10).max(4000),
-  priority: z.enum(['low', 'medium', 'high']).optional(),
+  priority: z.enum(['Alta', 'Media', 'Baja']).default('Media'),
   requiredBy: z.union([z.literal(''), z.iso.date()]).optional().transform((value) => value || null),
+  applicationDeadline: z.iso.date(),
+  applicationDocuments: applicationDocumentsSchema.default([]),
 });
 const documentSchema = z.object({
   requestId: z.union([z.literal(''), idSchema]).optional().default(''),
   workerId: z.union([z.literal(''), idSchema]).optional().default(''),
+  candidateId: z.union([z.literal(''), idSchema]).optional().default(''),
   documentType: nonEmptyText(120),
   description: z.string().trim().max(2000).default(''),
   status: z.enum(['pending', 'completed']).default('pending'),
-}).refine((data) => data.requestId || data.workerId, {
-  message: 'Vincula el documento a una solicitud o a un trabajador.',
+}).refine((data) => [data.requestId, data.workerId, data.candidateId].filter(Boolean).length === 1, {
+  message: 'Vincula el documento a un postulante, una solicitud o un trabajador.',
 });
 const evaluationSchema = z.object({
   requestId: z.union([z.literal(''), idSchema]).optional().default(''),
   workerId: z.union([z.literal(''), idSchema]).optional().default(''),
   evaluationName: nonEmptyText(160).default('Evaluación técnica'),
   candidateName: z.string().trim().max(160).default(''),
-  notes: z.string().trim().max(40000).default(''),
-  score: z.union([z.literal(''), z.null(), z.coerce.number().min(0).max(100)]).optional().transform((value) => value === '' ? null : value),
+  notes: z.string().trim().max(4000).default(''),
+  score: z.union([z.literal(''), z.coerce.number().min(0).max(100)]).optional().transform((value) => value === '' ? null : value),
   status: z.enum(['pending', 'completed']).default('pending'),
 }).refine((data) => data.requestId || data.workerId, {
   message: 'Vincula la evaluación a una solicitud o a un trabajador.',
-});
-const evaluationScoreSchema = z.object({
-  score: z.number().min(0).max(100),
 });
 const assignmentSchema = z.object({
   requestId: idSchema,
@@ -96,15 +104,73 @@ const updateUserSchema = z.object({
   password: z.union([z.literal(''), z.string().min(12).max(256)]).optional().default(''),
   isActive: z.boolean(),
 });
-const systemSettingsSchema = z.object({
-  organizationName: nonEmptyText(200),
-  fiscalYear: z.number().int().min(2000).max(2100),
-  supportEmail: z.union([z.literal(''), z.email().max(254)]).default(''),
-  maxUploadMb: z.number().int().min(1).max(50),
-  passingScore: z.number().int().min(0).max(100),
-  declarationDeadlineDays: z.number().int().min(1).max(90),
+const applicationSettingsSchema = z.object({
+  anonymizationEnabled: z.boolean(),
+  ocrConfidenceThreshold: z.number().int().min(0).max(100),
+  institutionalData: z.object({
+    rof: z.string().trim().max(120),
+    logoUrl: z.string().trim().max(500),
+    acronym: z.string().trim().min(1).max(40),
+    address: z.string().trim().max(240),
+    fiscalYear: z.number().int().min(2000).max(2200),
+  }).optional(),
+  catalogData: z.object({
+    roadTypes: z.array(nonEmptyText(100)).max(100),
+    laborRegimes: z.array(nonEmptyText(100)).max(100),
+    contractTypes: z.array(nonEmptyText(100)).max(100),
+    organizationalAreas: z.array(nonEmptyText(160)).max(200),
+    positionLevels: z.array(nonEmptyText(80)).max(100),
+    educationLevels: z.array(nonEmptyText(160)).max(100),
+  }).optional(),
 });
-const departmentSchema = z.object({ name: nonEmptyText(160) });
+const applicationDeadlineSchema = z.object({
+  applicationDeadline: z.iso.date(),
+});
+const blindCandidateSchema = z.object({
+  requestId: idSchema,
+  fullName: nonEmptyText(160),
+  documentNumber: nonEmptyText(24),
+  email: z.union([z.literal(''), z.email().max(254)]).optional().default(''),
+  phone: z.string().trim().max(40).optional().default(''),
+});
+const blindExamSchema = z.object({
+  answers: z.array(z.union([z.number().int(), z.string().max(2000)])).length(20),
+});
+const blindExamReviewSchema = z.object({
+  status: z.enum(['approved', 'rejected']),
+});
+const candidateProcessStageSchema = z.object({
+  processStage: z.enum([
+    'application_received',
+    'document_review',
+    'exam',
+    'interview',
+    'practical',
+    'final_result',
+  ]),
+  publicMessage: z.string().trim().max(500).default(''),
+  interviewDate: z.union([z.literal(''), z.iso.date()]).optional().default(''),
+  interviewTime: z.string().regex(/^\d{2}:\d{2}$/).or(z.literal('')).optional().default(''),
+  interviewModality: z.enum(['in_person', 'virtual']).or(z.literal('')).optional().default(''),
+  interviewLocation: z.string().trim().max(500).optional().default(''),
+}).refine((data) => {
+  const appointmentFields = [
+    data.interviewDate,
+    data.interviewTime,
+    data.interviewModality,
+    data.interviewLocation,
+  ];
+  const hasAppointmentData = appointmentFields.some(Boolean);
+  return !hasAppointmentData || (
+    data.processStage === 'interview' && appointmentFields.every(Boolean)
+  );
+}, {
+  message: 'Para programar la entrevista, completa fecha, hora, modalidad y lugar o enlace mientras la etapa sea entrevista.',
+});
+const simulatedCandidateNotificationSchema = z.object({
+  message: z.string().trim().min(1).max(1000),
+  confirmSimulation: z.boolean().default(false),
+});
 
 const requireId = (rawId) => {
   const parsed = idSchema.safeParse(rawId);
@@ -137,65 +203,64 @@ export function createModuleRouter() {
   const router = Router();
   router.use(authenticate);
 
-  router.get('/notifications', async (req, res) => {
-    res.json(await notificationRepository.listForUser(req.user.id));
-  });
-  router.patch('/notifications/:id/read', validateIdParam, async (req, res) => {
-    const updated = await notificationRepository.markRead(req.params.id, req.user.id);
-    if (!updated) throw new AppError(404, 'NOTIFICATION_NOT_FOUND', 'No se encontró la notificación.');
-    res.status(204).end();
-  });
-  router.post('/notifications/read-all', async (req, res) => {
-    const updated = await notificationRepository.markAllRead(req.user.id);
-    res.json({ updated });
-  });
+  router.get('/lookups', authorize('admin', 'hr_specialist', 'area_manager'), async (req, res) => (
+    res.json(await modulesRepository.getLookups(getAreaScope(req.user)))
+  ));
 
-  router.get('/lookups', async (req, res) => res.json(await modulesRepository.getLookups()));
-
-  router.get('/workers', async (req, res) => res.json({ workers: await modulesRepository.listWorkers() }));
-  router.post('/workers', async (req, res) => {
+  router.get('/workers', authorize('admin', 'hr_specialist', 'area_manager'), async (req, res) => (
+    res.json({ workers: await modulesRepository.listWorkers(getAreaScope(req.user)) })
+  ));
+  router.post('/workers', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = workerSchema.omit({ status: true }).parse(req.body);
     res.status(201).json({ worker: await modulesRepository.createWorker(input, req.user.id) });
   });
-  router.patch('/workers/:id', async (req, res) => {
+  router.patch('/workers/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = workerSchema.parse(req.body);
     res.json({ worker: await findOr404(() => modulesRepository.updateWorker(requireId(req.params.id), input, req.user.id)) });
   });
-  router.delete('/workers/:id', async (req, res) => {
+  router.delete('/workers/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     await findOr404(() => modulesRepository.deleteWorker(requireId(req.params.id), req.user.id));
     res.status(204).end();
   });
 
-  router.get('/profiles', async (req, res) => res.json({ profiles: await modulesRepository.listProfiles() }));
-  router.get('/profiles/:id', async (req, res) => {
-    const profile = await findOr404(
-      () => modulesRepository.getProfile(requireId(req.params.id)),
-      'No se encontró el perfil solicitado.',
-    );
-    res.json({ profile });
-  });
-  router.post('/profiles', async (req, res) => {
+  router.get('/profiles', authorize('admin', 'hr_specialist', 'area_manager'), async (req, res) => (
+    res.json({ profiles: await modulesRepository.listProfiles(getAreaScope(req.user)) })
+  ));
+  router.post('/profiles', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = profileSchema.parse(req.body);
     res.status(201).json({ id: await modulesRepository.createProfile(input, req.user.id) });
   });
-  router.patch('/profiles/:id', async (req, res) => {
+  router.patch('/profiles/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = profileSchema.parse(req.body);
     await findOr404(() => modulesRepository.updateProfile(requireId(req.params.id), input, req.user.id));
     res.json({ id: req.params.id });
   });
-  router.delete('/profiles/:id', async (req, res) => {
+  router.delete('/profiles/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     await findOr404(() => modulesRepository.deleteProfile(requireId(req.params.id), req.user.id));
     res.status(204).end();
   });
 
-  router.get('/requests', async (req, res) => res.json({ requests: await requestRepository.listAll() }));
-  router.get('/candidate-requests', async (req, res) => (
-    res.json({ requests: await requestRepository.listCandidateRequests() })
+  router.get('/requests', authorize('admin', 'hr_specialist', 'area_manager'), async (req, res) => (
+    res.json({ requests: await requestRepository.listAll(getAreaScope(req.user)) })
   ));
-  router.patch('/requests/:id', async (req, res) => {
+  router.patch('/requests/:id/deadline', authorize('admin', 'hr_specialist'), async (req, res) => {
+    const { applicationDeadline } = applicationDeadlineSchema.parse(req.body);
+    if (applicationDeadline <= new Date().toISOString().slice(0, 10)) {
+      throw new AppError(400, 'INVALID_APPLICATION_DEADLINE', 'La nueva fecha de cierre debe ser posterior a hoy.');
+    }
+    const result = await findOr404(
+      () => requestRepository.extendApplicationDeadline(requireId(req.params.id), applicationDeadline, req.user.id),
+      'Solo se puede ampliar el plazo de una convocatoria aprobada con fecha de cierre vigente.',
+    );
+    res.json({ request: result });
+  });
+  router.patch('/requests/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = requestDetailsSchema.parse(req.body);
     if (input.requiredBy && input.requiredBy < new Date().toISOString().slice(0, 10)) {
       throw new AppError(400, 'INVALID_REQUIRED_DATE', 'La fecha requerida no puede estar en el pasado.');
+    }
+    if (input.applicationDeadline <= new Date().toISOString().slice(0, 10)) {
+      throw new AppError(400, 'INVALID_APPLICATION_DEADLINE', 'La fecha de cierre debe ser posterior a hoy.');
     }
     const result = await findOr404(
       () => requestRepository.updatePending(requireId(req.params.id), input, req.user.id),
@@ -203,7 +268,7 @@ export function createModuleRouter() {
     );
     res.json({ request: result });
   });
-  router.patch('/requests/:id/status', async (req, res) => {
+  router.patch('/requests/:id/status', authorize('admin', 'hr_specialist'), async (req, res) => {
     const { status } = requestStatusSchema.parse(req.body);
     if (status === 'completed') {
       throw new AppError(400, 'INVALID_STATUS_TRANSITION', 'Una solicitud se completa mediante una asignación.');
@@ -214,7 +279,7 @@ export function createModuleRouter() {
     );
     res.json({ request: result });
   });
-  router.delete('/requests/:id', async (req, res) => {
+  router.delete('/requests/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     await findOr404(
       () => requestRepository.deletePending(requireId(req.params.id), req.user.id),
       'Solo se pueden eliminar solicitudes pendientes sin asignaciones.',
@@ -222,48 +287,232 @@ export function createModuleRouter() {
     res.status(204).end();
   });
 
-  router.get('/documents', async (req, res) => res.json({ documents: await modulesRepository.listWorkItems('documents') }));
-  router.post('/documents', async (req, res) => {
+  router.get('/documents', authorize('admin', 'hr_specialist'), async (req, res) => (
+    res.json({ documents: await modulesRepository.listWorkItems('documents') })
+  ));
+  router.post('/documents', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = documentSchema.parse(req.body);
     res.status(201).json({ document: await modulesRepository.createWorkItem('documents', input, req.user.id) });
   });
-  router.patch('/documents/:id', async (req, res) => {
+  router.patch('/documents/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = documentSchema.parse(req.body);
     res.json({ document: await findOr404(() => modulesRepository.updateWorkItem('documents', requireId(req.params.id), input, req.user.id)) });
   });
-  router.delete('/documents/:id', async (req, res) => {
+  router.delete('/documents/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     await findOr404(() => modulesRepository.deleteWorkItem('documents', requireId(req.params.id), req.user.id));
     res.status(204).end();
   });
 
-  router.get('/evaluations', async (req, res) => res.json({ evaluations: await modulesRepository.listWorkItems('evaluations') }));
-  router.post('/evaluations', async (req, res) => {
+  router.get('/evaluations', authorize('admin', 'hr_specialist'), async (req, res) => res.json({ evaluations: await modulesRepository.listWorkItems('evaluations') }));
+  router.post('/evaluations', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = evaluationSchema.parse(req.body);
     res.status(201).json({ evaluation: await modulesRepository.createWorkItem('evaluations', input, req.user.id) });
   });
-  router.patch('/evaluations/:id', async (req, res) => {
+  router.patch('/evaluations/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = evaluationSchema.parse(req.body);
     res.json({ evaluation: await findOr404(() => modulesRepository.updateWorkItem('evaluations', requireId(req.params.id), input, req.user.id)) });
   });
-  router.patch('/evaluations/:id/score', async (req, res) => {
-    const { score } = evaluationScoreSchema.parse(req.body);
-    const evaluation = await findOr404(() => modulesRepository.scoreEvaluation(
-      requireId(req.params.id),
-      score,
-      req.user.id,
-    ));
-    res.json({ evaluation });
-  });
-  router.delete('/evaluations/:id', async (req, res) => {
+  router.delete('/evaluations/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     await findOr404(() => modulesRepository.deleteWorkItem('evaluations', requireId(req.params.id), req.user.id));
     res.status(204).end();
   });
 
-  router.post('/documents/:id/file', validateIdParam, uploadDocument, async (req, res) => {
+  router.get('/blind-selection/banks', authorize('admin', 'hr_specialist'), async (req, res) => {
+    res.json({ banks: modulesRepository.getBlindSelectionBanks() });
+  });
+  router.get('/blind-selection/candidates', authorize('admin', 'hr_specialist'), async (req, res) => {
+    res.json({ candidates: await modulesRepository.listBlindSelectionCandidates(getAreaScope(req.user)) });
+  });
+  router.get('/blind-selection/simulated-notifications', authorize('admin', 'hr_specialist'), async (req, res) => {
+    res.json({
+      notifications: await modulesRepository.listSimulatedCandidateNotifications(getAreaScope(req.user)),
+    });
+  });
+  router.get('/blind-selection/candidate-document-options', authorize('admin', 'hr_specialist'), async (req, res) => {
+    res.json({
+      candidates: await modulesRepository.listBlindCandidateDocumentOptions(getAreaScope(req.user)),
+    });
+  });
+  router.get('/blind-selection/candidates/:id/resume-review', authorize('admin', 'hr_specialist'), async (req, res, next) => {
+    try {
+      const candidate = await modulesRepository.getBlindCandidateResumeReviewInput(
+        requireId(req.params.id),
+        getAreaScope(req.user),
+      );
+      if (!candidate) throw new AppError(404, 'CANDIDATE_NOT_FOUND', 'No se encontró al postulante.');
+      if (!candidate.resume_file_path) {
+        throw new AppError(404, 'RESUME_NOT_AVAILABLE', 'Este postulante no tiene un CV adjunto para revisar.');
+      }
+
+      let extractedText;
+      try {
+        extractedText = await extractText(candidate.resume_file_path, candidate.resume_file_mime);
+      } catch (error) {
+        console.error('No se pudo extraer texto para la revisión ciega del CV:', error);
+        throw new AppError(422, 'RESUME_EXTRACTION_FAILED', 'No se pudo leer el CV. Verifica el archivo e inténtalo nuevamente.');
+      }
+
+      let pdfMetadata = {};
+      try {
+        pdfMetadata = await extractPdfMetadata(candidate.resume_file_path);
+      } catch (error) {
+        console.error('No se pudieron leer los metadatos del CV:', error);
+        pdfMetadata = { metadataStatus: 'unavailable' };
+      }
+      const duplicates = await modulesRepository.findExactDuplicateCandidateResumeFiles(
+        candidate.id,
+        candidate.resume_file_sha256,
+      );
+      const findings = assessDocumentReview({
+        text: extractedText,
+        candidate,
+        duplicates,
+        pdfMetadata,
+      });
+      const { text, maskedItems, identityMismatch } = redactCandidateDocumentText(
+        extractedText,
+        candidate,
+        findings,
+      );
+      res.set('Cache-Control', 'no-store');
+      return res.json({
+        review: {
+          applicationCode: candidate.application_code,
+          fileSha256: candidate.resume_file_sha256,
+          identityRevealed: candidate.identity_revealed,
+          identityMismatch,
+          text,
+          quality: assessResumeTextQuality(extractedText),
+          maskedItems,
+          pdfMetadata,
+          findings,
+          reviewedAt: candidate.resume_reviewed_at,
+          reviewedByName: candidate.resume_reviewed_by_name,
+        },
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+  router.patch('/blind-selection/candidates/:id/resume-review', authorize('admin', 'hr_specialist'), async (req, res) => {
+    const result = await modulesRepository.markBlindCandidateResumeReviewed(
+      requireId(req.params.id),
+      req.user.id,
+    );
+    if (!result) throw new AppError(404, 'RESUME_NOT_AVAILABLE', 'No se encontró el CV del postulante.');
+    res.json({
+      reviewedAt: result.resume_reviewed_at,
+      reviewedByName: req.user.displayName,
+    });
+  });
+  router.patch('/blind-selection/candidates/:id/stage', authorize('admin', 'hr_specialist'), async (req, res) => {
+    const { processStage, publicMessage, interviewDate, interviewTime, interviewModality, interviewLocation } =
+      candidateProcessStageSchema.parse(req.body);
+    if (interviewDate && interviewTime) {
+      const interviewAt = new Date(`${interviewDate}T${interviewTime}:00-05:00`);
+      if (interviewAt <= new Date()) {
+        throw new AppError(400, 'INVALID_INTERVIEW_DATE', 'La fecha y hora de la entrevista deben ser futuras.');
+      }
+    }
+    const candidate = await findOr404(
+      () => modulesRepository.updateBlindCandidateStage(
+        requireId(req.params.id),
+        processStage,
+        publicMessage,
+        req.user.id,
+        interviewDate && interviewTime
+          ? { interviewDate, interviewTime, interviewModality, interviewLocation }
+          : null,
+      ),
+      'No se encontró al postulante.',
+    );
+    res.json({ candidate });
+  });
+  router.post('/blind-selection/candidates/:id/simulated-notifications', authorize('admin', 'hr_specialist'), async (req, res) => {
+    const { message, confirmSimulation } = simulatedCandidateNotificationSchema.parse(req.body);
+    if (!confirmSimulation) {
+      throw new AppError(400, 'SIMULATION_CONFIRMATION_REQUIRED', 'Confirma que registrarás solo una simulación; no se enviará un WhatsApp real.');
+    }
+    const notification = await modulesRepository.createSimulatedCandidateNotification(
+      requireId(req.params.id),
+      message,
+      req.user.id,
+      getAreaScope(req.user),
+    );
+    if (!notification) throw new AppError(404, 'CANDIDATE_NOT_FOUND', 'No se encontró al postulante.');
+    res.status(201).json({ notification });
+  });
+  router.post('/blind-selection/candidates/:id/match', authorize('admin', 'hr_specialist'), async (req, res, next) => {
+    try {
+      const candidateId = requireId(req.params.id);
+      const candidate = await modulesRepository.getBlindCandidateMatchInput(candidateId);
+      if (!candidate) throw new AppError(404, 'CANDIDATE_NOT_FOUND', 'No se encontró al postulante.');
+      if (!candidate.resume_file_path) {
+        throw new AppError(404, 'RESUME_NOT_AVAILABLE', 'Este postulante no tiene un CV adjunto para calcular el match.');
+      }
+
+      let resumeText;
+      try {
+        resumeText = await extractText(candidate.resume_file_path, candidate.resume_file_mime);
+      } catch (error) {
+        console.error('No se pudo extraer texto para calcular el match del CV:', error);
+        throw new AppError(422, 'MATCH_EXTRACTION_FAILED', 'No se pudo leer el CV. Verifica el archivo e inténtalo nuevamente.');
+      }
+      const matchResult = scoreResumeMatch(candidate, resumeText);
+      const match = await modulesRepository.updateBlindCandidateMatch(candidateId, matchResult, req.user.id);
+      if (!match) throw new AppError(404, 'CANDIDATE_NOT_FOUND', 'No se encontró al postulante.');
+      return res.json({ match });
+    } catch (error) {
+      return next(error);
+    }
+  });
+  router.get('/blind-selection/candidates/:id/resume', authorize('admin', 'hr_specialist'), async (req, res, next) => {
+    try {
+      const file = await modulesRepository.getRevealedCandidateResume(requireId(req.params.id));
+      if (!file) throw new AppError(404, 'RESUME_NOT_AVAILABLE', 'El CV no está disponible hasta que se revele la identidad del postulante.');
+      return res.download(file.file_path, file.file_name, (error) => {
+        if (error) next(error);
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+  router.post('/blind-selection/candidates', authorize('admin', 'hr_specialist'), async (req, res) => {
+    const input = blindCandidateSchema.parse(req.body);
+    const candidate = await modulesRepository.createBlindSelectionCandidate(input, req.user.id);
+    res.status(201).json({ candidate });
+  });
+  router.post('/blind-selection/candidates/:id/exam', authorize('admin', 'hr_specialist'), async (req, res) => {
+    const { answers } = blindExamSchema.parse(req.body);
+    const exam = await modulesRepository.submitBlindSelectionExam(
+      requireId(req.params.id),
+      answers,
+      req.user.id,
+    );
+    res.status(201).json({ exam });
+  });
+  router.get('/blind-selection/candidates/:id/review', authorize('admin', 'hr_specialist'), async (req, res) => {
+    const exam = await findOr404(
+      () => modulesRepository.getBlindSelectionExamForReview(requireId(req.params.id)),
+      'No se encontró un examen para revisar.',
+    );
+    res.json({ exam });
+  });
+  router.patch('/blind-selection/candidates/:id/review', authorize('admin', 'hr_specialist'), async (req, res) => {
+    const { status } = blindExamReviewSchema.parse(req.body);
+    const result = await modulesRepository.reviewBlindSelectionExam(
+      requireId(req.params.id),
+      status,
+      req.user.id,
+    );
+    res.json(result);
+  });
+
+  router.post('/documents/:id/file', authorize('admin', 'hr_specialist'), validateIdParam, uploadDocument, async (req, res) => {
     const document = await documentService.attachFile(req.params.id, req.file, req.user.id);
     res.status(202).json({ document });
   });
-  router.get('/documents/:id/file', async (req, res) => {
+  router.get('/documents/:id/file', authorize('admin', 'hr_specialist'), async (req, res) => {
     const file = await findOr404(
       () => modulesRepository.getDocumentFile(requireId(req.params.id)),
       'El documento no tiene archivo adjunto.',
@@ -271,31 +520,36 @@ export function createModuleRouter() {
     if (!file.file_path) throw new AppError(404, 'NO_FILE', 'El documento no tiene archivo adjunto.');
     res.download(file.file_path, file.file_name ?? undefined);
   });
-  router.post('/documents/:id/ocr', async (req, res) => {
+  router.post('/documents/:id/ocr', authorize('admin', 'hr_specialist'), async (req, res) => {
     res.status(202).json({ document: await documentService.reprocessOcr(requireId(req.params.id)) });
   });
 
-  router.get('/assignments', async (req, res) => res.json({ assignments: await modulesRepository.listAssignments() }));
-  router.post('/assignments', async (req, res) => {
+  router.get('/assignments', authorize('admin', 'hr_specialist'), async (req, res) => (
+    res.json({ assignments: await modulesRepository.listAssignments() })
+  ));
+  router.post('/assignments', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = assignmentSchema.parse(req.body);
     res.status(201).json({ assignment: await modulesRepository.createAssignment(input, req.user.id) });
   });
-  router.patch('/assignments/:id', async (req, res) => {
+  router.patch('/assignments/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     const input = assignmentSchema.parse(req.body);
     res.json({ assignment: await findOr404(() => modulesRepository.updateAssignment(requireId(req.params.id), input, req.user.id)) });
   });
-  router.delete('/assignments/:id', async (req, res) => {
+  router.delete('/assignments/:id', authorize('admin', 'hr_specialist'), async (req, res) => {
     await findOr404(() => modulesRepository.deleteAssignment(requireId(req.params.id), req.user.id));
     res.status(204).end();
   });
 
-  router.get('/reports', async (req, res) => {
+  router.get('/reports', authorize('admin', 'hr_specialist', 'area_manager'), async (req, res) => {
     const type = z.enum(['requests', 'workers', 'evaluations']).parse(req.query.type ?? 'requests');
-    res.json({ type, rows: await modulesRepository.getReportData(type) });
+    res.json({ type, rows: await modulesRepository.getReportData(type, getAreaScope(req.user)) });
   });
-  router.get('/reports/:type.csv', async (req, res) => {
+  router.get('/reports/kpis', authorize('admin', 'hr_specialist', 'area_manager'), async (req, res) => {
+    res.json(await modulesRepository.getReportKpis(getAreaScope(req.user)));
+  });
+  router.get('/reports/:type.csv', authorize('admin', 'hr_specialist', 'area_manager'), async (req, res) => {
     const type = z.enum(['requests', 'workers', 'evaluations']).parse(req.params.type);
-    const rows = await modulesRepository.getReportData(type);
+    const rows = await modulesRepository.getReportData(type, getAreaScope(req.user));
     const columns = rows.length ? Object.keys(rows[0]) : [];
     const content = [columns, ...rows.map((row) => columns.map((column) => row[column]))]
       .map((row) => row.map(csvCell).join(','))
@@ -309,12 +563,15 @@ export function createModuleRouter() {
     res.json({ events: await modulesRepository.listAuditEvents() });
   });
 
-  router.get('/system-info', async (req, res) => {
-    res.json({ system: await modulesRepository.getSystemInfo() });
-  });
-
   router.get('/settings/users', authorize('admin'), async (req, res) => {
     res.json({ users: await modulesRepository.listUsers() });
+  });
+  router.get('/settings', authorize('admin'), async (req, res) => {
+    res.json({ settings: await modulesRepository.getApplicationSettings() });
+  });
+  router.put('/settings', authorize('admin'), async (req, res) => {
+    const input = applicationSettingsSchema.parse(req.body);
+    res.json({ settings: await modulesRepository.updateApplicationSettings(input, req.user.id) });
   });
   router.post('/settings/users', authorize('admin'), async (req, res) => {
     const input = createUserSchema.parse(req.body);
@@ -340,35 +597,6 @@ export function createModuleRouter() {
     const id = requireId(req.params.id);
     if (id === req.user.id) throw new AppError(400, 'CANNOT_DEACTIVATE_SELF', 'No puedes desactivar tu propia cuenta.');
     await findOr404(() => modulesRepository.deactivateUser(id, req.user.id), 'No existe el usuario o no puede desactivarse.');
-    res.status(204).end();
-  });
-  router.get('/settings/system', authorize('admin'), async (req, res) => {
-    res.json({ settings: await modulesRepository.getSystemSettings() });
-  });
-  router.patch('/settings/system', authorize('admin'), async (req, res) => {
-    const input = systemSettingsSchema.parse(req.body);
-    res.json({ settings: await modulesRepository.updateSystemSettings(input, req.user.id) });
-  });
-  router.get('/settings/departments', authorize('admin'), async (req, res) => {
-    res.json({ departments: await modulesRepository.listDepartments() });
-  });
-  router.post('/settings/departments', authorize('admin'), async (req, res) => {
-    const { name } = departmentSchema.parse(req.body);
-    res.status(201).json({ department: await modulesRepository.createDepartment(name, req.user.id) });
-  });
-  router.patch('/settings/departments/:id', authorize('admin'), async (req, res) => {
-    const { name } = departmentSchema.parse(req.body);
-    const department = await modulesRepository.updateDepartment(
-      requireId(req.params.id),
-      name,
-      req.user.id,
-    );
-    res.json({ department: await findOr404(() => department) });
-  });
-  router.delete('/settings/departments/:id', authorize('admin'), async (req, res) => {
-    await findOr404(
-      () => modulesRepository.deleteDepartment(requireId(req.params.id), req.user.id),
-    );
     res.status(204).end();
   });
 

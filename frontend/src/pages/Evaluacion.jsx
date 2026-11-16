@@ -1,292 +1,237 @@
 import React, { useEffect, useState } from 'react';
 import Sidebar from '../components/sidebar';
 import UserDropdown from '../components/UserDropdown';
-import { apiRequest } from '../lib/api';
+import { apiRequest } from '../services/api';
+import { useAuth } from '../auth/AuthContext';
 
-const crearPreguntas = (opcionMultiple, desarrollo) => [
-  ...opcionMultiple.map((fila) => ({
-    tipo: 'opcion_multiple',
-    texto: fila[0],
-    opciones: fila.slice(1, -1),
-    respuesta: fila[fila.length - 1],
-  })),
-  ...desarrollo.map((texto) => ({ tipo: 'desarrollo', texto })),
+const etapasProceso = [
+  { value: 'application_received', label: 'Postulación recibida' },
+  { value: 'document_review', label: 'Revisión de documentos' },
+  { value: 'exam', label: 'Examen' },
+  { value: 'interview', label: 'Entrevista personal' },
+  { value: 'practical', label: 'Práctica básica' },
+  { value: 'final_result', label: 'Resultado final' },
 ];
 
-const evaluacionesPorPuesto = {
-  'Inspector Tributario y Orientador al Contribuyente': crearPreguntas([
-    ['¿Cuál es la norma que regula las competencias y tributos municipales en el Perú?', 'Ley N° 27444', 'Texto Único Ordenado del Código Tributario (D.S. 133-2013-EF)', 'Ley N° 30057', 1],
-    ['¿Qué tributo municipal grava la propiedad de los predios urbanos y rurales?', 'Impuesto de Alcabala', 'Impuesto Predial', 'Arbitrios Municipales', 1],
-    ['La tasa que se paga por la prestación o mantenimiento de un servicio público municipal se denomina:', 'Impuesto', 'Licencia', 'Arbitrio', 2],
-    ['¿Qué documento formaliza la determinación de una deuda tributaria por fiscalización?', 'Orden de Pago', 'Resolución de Determinación', 'Esquela de Citación', 1],
-    ['El Impuesto de Alcabala grava:', 'Las transferencias de propiedad de inmuebles a título oneroso o gratuito.', 'La posesión anual de vehículos.', 'El ejercicio de actividades comerciales.', 0],
-    ['¿Cuál es el plazo general para la prescripción de la facultad de la administración para determinar la obligación tributaria?', '2 años', '4 años', '10 años', 1],
-    ['La Hoja del Resumen (HR) y el Predio Urbano (PU) forman parte de:', 'La declaración jurada del Impuesto Predial (Cuponera).', 'El expediente coactivo.', 'La licencia de funcionamiento.', 0],
-    ['Un contribuyente realiza una ampliación de construcción en su predio, ¿en qué plazo debe declararlo?', 'Hasta el último día hábil del mes siguiente de concluidos los trabajos.', 'A los 6 meses.', 'Al final del ejercicio fiscal.', 0],
-    ['¿Qué efecto tiene la notificación de una esquela de fiscalización sobre el plazo prescriptorio?', 'Lo extingue.', 'Lo interrumpe.', 'No produce ningún efecto.', 1],
-    ['¿A quién le corresponde el pago de arbitrios municipales?', 'Al poseedor o propietario del predio al 1 de enero o inicio de la obligación.', 'Únicamente al inquilino.', 'Al Gobierno Regional.', 0],
-    ['En una inspección de campo, si el contribuyente impide el ingreso al predio, el inspector debe:', 'Cancelar el trámite.', 'Levantar un Acta de Inspección consignando la negativa y firma de testigos.', 'Imponer una multa física inmediata.', 1],
-    ['¿Qué beneficio tributario otorga la Ley a los adultos mayores no pensionistas sobre el Impuesto Predial?', 'Condonación del 100% de arbitrios.', 'Deducción de 50 UIT de la base imponible del Impuesto Predial.', 'Exoneración total del Impuesto a la Renta.', 1],
-    ['¿Cuál es el órgano que resuelve en última instancia administrativa las reclamaciones tributarias municipales?', 'El Alcalde', 'El Tribunal Fiscal', 'Indecopi', 1],
-    ['Las sanciones por infracciones tributarias municipales se regulan conforme a:', 'Las Tablas de Infracciones y Sanciones del Código Tributario.', 'El Código Penal.', 'El Manual de Organización y Funciones (MOF).', 0],
-    ['¿Qué documento autoriza el ejercicio de actividades económicas en un establecimiento en el distrito?', 'Certificado de Catastro', 'Licencia de Funcionamiento', 'Constancia de Posesión', 1],
-  ], [
-    'Caso práctico: Durante una inspección en el distrito de Los Aquijes, detecta un local comercial que funciona con un giro distinto al autorizado en su Licencia de Funcionamiento. Redacte el procedimiento paso a paso que debe ejecutar como inspector.',
-    'Explique la diferencia legal e impositiva entre una Orden de Pago y una Resolución de Determinación.',
-    'Describa cuáles son los requisitos que debe verificar un fiscalizador en campo para la constatación de un predio subvaluado.',
-    '¿Cómo orientaría a un vecino adulto mayor que acude a la municipalidad solicitando el beneficio de deducción del Impuesto Predial pero no cuenta con título de propiedad inscrito en SUNARP?',
-    'Redacte el modelo de un Acta de Inspección Predial incluyendo los datos obligatorios que exige la norma.',
-  ]),
-  'Especialista en Contrataciones del Estado (OEC)': crearPreguntas([
-    ['¿Cuál es la norma vigente que regula las contrataciones de bienes, servicios y obras con el Estado?', 'Ley N° 30225 y su Reglamento.', 'Ley N° 27444', 'D.L. 1057', 0],
-    ['El instrumento de gestión que consolida todos los requerimientos de bienes y servicios del año se llama:', 'ROF', 'PAC (Plan Anual de Contrataciones)', 'POI', 1],
-    ['Las contrataciones cuyos montos sean iguales o inferiores a 8 UIT se encuentran:', 'Inaplicables de supervisión por el OSCE.', 'Excluidas del ámbito de aplicación de la Ley, pero sujetas a supervisión y principios.', 'Prohibidas para municipios distritales.', 1],
-    ['¿Qué plataforma informática se utiliza obligatoriamente para registrar los actos del proceso de selección?', 'SIAF-SP', 'SEACE', 'SIGA-MEF', 1],
-    ['¿Qué órgano se encarga de preparar las bases y conducir el procedimiento de licitación pública?', 'La Alcaldía', 'El Comité de Selección o la OEC.', 'La Subgerencia de Tesorería', 1],
-    ['La indagación de mercado realizada por la OEC sirve principalmente para:', 'Elegir al ganador del contrato.', 'Determinar el valor estimado o referencial de la contratación.', 'Aprobar el expediente técnico.', 1],
-    ['Es una penalidad aplicable al contratista por retraso injustificado en la ejecución de la prestación:', 'Penalidad por mora.', 'Multa fiscal.', 'Inhabilitación permanente.', 0],
-    ['La garantía de fiel cumplimiento equivale a:', '5% del monto del contrato.', '10% del monto del contrato original.', '15% del valor estimado.', 1],
-    ['¿Cuál es el recurso de impugnación mediante el cual los postores cuestionan las decisiones del comité en una adjudicación simplificada?', 'Recurso de Reconsideración.', 'Recurso de Apelación.', 'Queja administrativa.', 1],
-    ['¿Qué documento formaliza la vinculación entre la entidad y el postor ganador de la buena pro?', 'Orden de Compra/Servicio o Contrato.', 'Bases Integradas.', 'Requerimiento del área usuaria.', 0],
-    ['¿A quién le corresponde formular las especificaciones técnicas o términos de referencia (TDR)?', 'A la Subgerencia de Logística.', 'Al Área Usuaria solicitante.', 'Al Órgano de Control Institucional (OCI).', 1],
-    ['La modificación contractual que implica el incremento de prestaciones hasta por el límite del 25% se denomina:', 'Adicional de contrato.', 'Adenda de tiempo.', 'Contratación directa.', 0],
-    ['¿En qué estado del proceso en el SEACE los postores pueden formular consultas y observaciones a las bases?', 'Convocatoria.', 'Formulación de consultas u observaciones.', 'Evaluación de ofertas.', 1],
-    ['El fraccionamiento de contrataciones está:', 'Permitido si se cuenta con presupuesto.', 'Expresamente prohibido bajo responsabilidad administrativa.', 'Permitido solo en el mes de diciembre.', 1],
-    ['¿Qué documento otorga conformidad a la recepción de bienes o servicios contratados?', 'El comprobante de pago de la factura.', 'El informe de conformidad emitido por el Área Usuaria.', 'La firma del alcalde.', 1],
-  ], [
-    'Caso práctico: Un área usuaria envía un requerimiento de servicio de mantenimiento de camionetas que coincide exactamente con las características de una marca y taller específico de Ica. ¿Cómo actúa el especialista de la OEC ante este posible direccionamiento?',
-    'Detalle los pasos y requisitos legales necesarios para declarar la resolución de un contrato por incumplimiento del contratista.',
-    'Explique en qué supuestos procede realizar una Contratación Directa por Situación de Emergencia en una municipalidad distrital.',
-    '¿Cuál es el procedimiento técnico para calcular la penalidad diaria por mora aplicable a un proveedor que entregó bienes con 5 días de retraso?',
-    'Redacte las directrices que debe contener una Ficha de Especificaciones Técnicas para la adquisición de insumos del Programa Vaso de Leche.',
-  ]),
-  'Serenazgo Chofer': crearPreguntas([
-    ['¿Cuál es el marco normativo que regula el servicio de serenazgo municipal a nivel nacional?', 'Ley N° 31297 (Ley del Servicio de Serenazgo Municipal).', 'Reglamento Nacional de Tránsito.', 'Ley Orgánica de Municipalidades.', 0],
-    ['Un conductor de unidad de Serenazgo debe contar obligatoriamente con brevete de categoría mínima:', 'Clase A Categ. I', 'Clase A Categ. II-b', 'Clase B Categ. II', 1],
-    ['En una intervención ante un hecho delictivo en flagrancia, el sereno debe:', 'Sancionar inmediatamente al infractor.', 'Prestar auxilio, practicar el arresto ciudadano y entregar de inmediato a la PNP.', 'Trasladar al detenido al depósito municipal.', 1],
-    ['¿Qué elemento de alerta sonora y luminosa identifica a los vehículos de Serenazgo Municipal?', 'Circulina de color rojo.', 'Circulina de color azul y sirena de patrullaje.', 'Circulina de color ámbar.', 1],
-    ['El documento operativo donde el conductor registra el kilometraje, combustible y novedades del turno se llama:', 'Cuaderno de cargos.', 'Bitácora o Cuaderno de Ocurrencias / Hoja de Ruta.', 'Papeleta de infracción.', 1],
-    ['Ante un accidente de tránsito con heridos en la vía pública, la prioridad absoluta del Serenazgo Chofer es:', 'Tomar fotos para las redes institucionales.', 'Asegurar la zona y coordinar el auxilio médico/traslado urgente.', 'Perseguir al otro vehículo involucrado.', 1],
-    ['¿Cuál es el límite máximo de velocidad en calles y jirones según el Reglamento Nacional de Tránsito en zonas urbanas?', '30 km/h', '60 km/h', '80 km/h', 0],
-    ['¿Qué significa el Patrullaje Integrado en la gestión municipal?', 'Patrullaje realizado por serenos y vecinos vigilantes.', 'Patrullaje conjunto entre la unidad de Serenazgo y un efectivo de la Policía Nacional (PNP).', 'Patrullaje exclusivo de serenazgo nocturno.', 1],
-    ['En el uso de la fuerza y medios de defensa, el personal de serenazgo está sujeto a:', 'Uso proporcional y disuasivo reglamentado por ley.', 'Uso de armas de fuego de largo alcance.', 'Criterio libre del conductor.', 0],
-    ['¿Qué debe revisar el conductor antes de iniciar el servicio de patrullaje con la camioneta?', 'Únicamente el sistema de radio.', 'Niveles de aceite, agua, frenos, presión de llantas, luces y equipo de auxilio mecánico.', 'La limpieza del parabrisas solamente.', 1],
-    ['Al conducir en situaciones de emergencia con la sirena encendida, el Chofer de Serenazgo:', 'Queda eximido del deber de conducir con prudencia y cuidado.', 'Debe conducir con máxima cautela respetando la vida de los peatones.', 'Puede invadir carriles sin reducir la velocidad en cruces.', 1],
-    ['La comunicación por radiofrecuencia en el vehículo debe ser:', 'Breve, clara y utilizando los códigos radiales operativos establecidos.', 'Informativa con opiniones personales sobre la intervención.', 'Utilizada para llamadas personales.', 0],
-    ['Si durante el patrullaje se identifica un vehículo abandonado en la vía pública con signos de haber sido robado, se debe:', 'Remolcarlo inmediatamente al taller municipal.', 'Reportar a la central de monitoreo y custodiar la escena hasta la llegada de la PNP.', 'Dejar una nota en el parabrisas.', 1],
-    ['¿Qué actitud debe mantener el sereno ante la provocación verbal de un ciudadano intervenido?', 'Responder con la misma intensidad.', 'Mantener la calma, firmeza, respeto y lenguaje disuasivo sin caer en provocaciones.', 'Proceder al uso de la fuerza física.', 1],
-    ['El equipamiento básico de protección personal (EPP) de un Serenazgo Chofer incluye:', 'Chaleco antibalas/anticorte, casco táctico, vara de ley y radio portátil.', 'Chaleco reflectivo simple.', 'Indumentaria de civil.', 0],
-  ], [
-    'Caso práctico: Durante el patrullaje por el sector rural de Los Aquijes, observa un choque entre dos mototaxis con personas heridas en la calzada. Describa la secuencia exacta de acciones que ejecuta desde la conducción del vehículo hasta la llegada de la PNP y ambulancia.',
-    'Explique cuáles son los límites de actuación del Serenazgo Municipal según la Ley N° 31297 durante una intervención por alteración del orden público en la vía pública.',
-    'Redacte un informe breve de ocurrencias sobre un auxilio mecánico y resguardo prestado a un vecino en la noche.',
-    '¿Cómo debe actuar si al realizar el relevo de turno detecta que el vehículo presenta una abolladura reciente no reportada en la bitácora del turno anterior?',
-    'Mencione y explique 5 códigos o protocolos radiales utilizados para el reporte de emergencias durante el patrullaje municipal.',
-  ]),
+const fechaActualLima = () => {
+  const dateParts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Lima',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date()).map(({ type, value }) => [type, value]),
+  );
+  return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
 };
 
 export default function Evaluaciones() {
+  const { user } = useAuth();
   const [modo, setModo] = useState('historial');
-  const [evaluaciones, setEvaluaciones] = useState([]);
-  const [solicitudes, setSolicitudes] = useState([]);
-  const [solicitudId, setSolicitudId] = useState('');
+  const [candidatos, setCandidatos] = useState([]);
+  const [avisosSimulados, setAvisosSimulados] = useState([]);
+  const [bancos, setBancos] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState('');
   const [candidato, setCandidato] = useState('');
-  const [puesto, setPuesto] = useState('');
   const [indicePregunta, setIndicePregunta] = useState(0);
   const [respuestas, setRespuestas] = useState({});
   const [marcadas, setMarcadas] = useState([]);
   const [resultado, setResultado] = useState(null);
-  const [evaluacionSeleccionada, setEvaluacionSeleccionada] = useState(null);
-  const [puntajeManual, setPuntajeManual] = useState('');
-  const [cargando, setCargando] = useState(true);
-  const [guardando, setGuardando] = useState(false);
-  const [calificando, setCalificando] = useState(false);
-  const [error, setError] = useState('');
-  const [puntajeMinimo, setPuntajeMinimo] = useState(70);
-  const preguntas = evaluacionesPorPuesto[puesto] || [];
+  const [etapasPendientes, setEtapasPendientes] = useState({});
+  const [mensajesPendientes, setMensajesPendientes] = useState({});
+  const [citasPendientes, setCitasPendientes] = useState({});
+  const [guardandoEtapa, setGuardandoEtapa] = useState('');
+  const [mensajeAvance, setMensajeAvance] = useState('');
+  const [candidatoAviso, setCandidatoAviso] = useState('');
+  const [mensajeAviso, setMensajeAviso] = useState('');
+  const [confirmarAviso, setConfirmarAviso] = useState(false);
+  const [enviandoAviso, setEnviandoAviso] = useState(false);
+  const [estadoAviso, setEstadoAviso] = useState('');
+  const puedeActualizarAvance = ['admin', 'hr_specialist'].includes(user?.role);
+  const candidatoSeleccionado = candidatos.find((item) => item.id === candidato);
+  const puesto = candidatoSeleccionado?.position_title ?? '';
+  const bancoSeleccionado = bancos.find((banco) => banco.puesto === puesto);
+  const preguntas = bancoSeleccionado?.preguntas ?? [];
+  const cantidadObjetivas = preguntas.filter((pregunta) => pregunta.tipo === 'opcion').length;
+  const cantidadEscritas = preguntas.filter((pregunta) => pregunta.tipo === 'escrita').length;
 
   const cargarDatos = async () => {
-    setCargando(true);
-    try {
-      const [evaluationsResult, requestsResult, systemResult] = await Promise.all([
-        apiRequest('/evaluations'),
-        apiRequest('/candidate-requests'),
-        apiRequest('/system-info'),
-      ]);
-      setEvaluaciones(evaluationsResult.evaluations);
-      setSolicitudes(requestsResult.requests);
-      setPuntajeMinimo(systemResult.system.passing_score);
-      setError('');
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setCargando(false);
-    }
+    const [candidateResult, bankResult, noticeResult] = await Promise.all([
+      apiRequest('/blind-selection/candidates'),
+      apiRequest('/blind-selection/banks'),
+      apiRequest('/blind-selection/simulated-notifications'),
+    ]);
+    setCandidatos(candidateResult.candidates);
+    setBancos(bankResult.banks);
+    setAvisosSimulados(noticeResult.notifications);
   };
 
   useEffect(() => {
-    cargarDatos();
+    cargarDatos()
+      .catch((requestError) => setError(requestError.message))
+      .finally(() => setCargando(false));
   }, []);
 
   const iniciarEvaluacion = (event) => {
     event.preventDefault();
-    const request = solicitudes.find((item) => item.id === solicitudId);
-    if (!request) {
-      setError('Selecciona una solicitud para asociar la evaluación.');
-      return;
-    }
-    if (!evaluacionesPorPuesto[request.position_title]) {
-      setError('Todavía no hay un examen configurado para este puesto.');
-      return;
-    }
-    setPuesto(request.position_title);
-    setError('');
+    if (!candidatoSeleccionado || !bancoSeleccionado) return;
     setIndicePregunta(0);
     setRespuestas({});
     setMarcadas([]);
+    setError('');
     setModo('prueba');
   };
 
   const finalizarEvaluacion = async () => {
-    const correctas = preguntas.slice(0, 15).reduce(
-      (total, pregunta, indice) => total + (respuestas[indice] === pregunta.respuesta ? 1 : 0),
-      0
-    );
-    const detalles = {
-      puesto,
-      respuestasObjetivas: preguntas.slice(0, 15).map((pregunta, indice) => ({
-        pregunta: pregunta.texto,
-        respuesta: pregunta.opciones[respuestas[indice]],
-        correcta: respuestas[indice] === pregunta.respuesta,
-      })),
-      respuestasDesarrollo: preguntas.slice(15).map((pregunta, indice) => ({
-        pregunta: pregunta.texto,
-        respuesta: respuestas[indice + 15],
-      })),
-    };
-    setGuardando(true);
+    setEnviando(true);
     setError('');
     try {
-      await apiRequest('/evaluations', {
+      const { exam } = await apiRequest(`/blind-selection/candidates/${candidato}/exam`, {
         method: 'POST',
-        body: JSON.stringify({
-          requestId: solicitudId,
-          evaluationName: `Evaluación técnica - ${puesto}`,
-          candidateName: candidato.trim(),
-          notes: JSON.stringify(detalles),
-          score: null,
-          status: 'pending',
-        }),
+        body: JSON.stringify({ answers: preguntas.map((_, index) => respuestas[index]) }),
       });
-      await cargarDatos();
-      setResultado({ correctas });
+      const puntaje = Number(exam.objective_score);
+      const correctas = Math.round((puntaje / 100) * cantidadObjetivas);
+      const estado = puntaje === 100 ? 'Pendiente de revisión' : 'Desaprobado';
+      setResultado({ correctas, puntaje, estado });
       setModo('resultado');
+      await cargarDatos();
     } catch (requestError) {
       setError(requestError.message);
     } finally {
-      setGuardando(false);
+      setEnviando(false);
     }
   };
 
   const volverAlHistorial = () => {
     setModo('historial');
     setCandidato('');
-    setPuesto('');
-    setSolicitudId('');
     setResultado(null);
   };
 
-  const revisarEvaluacion = (evaluacion) => {
-    let detalle = null;
-    try {
-      detalle = JSON.parse(evaluacion.notes);
-    } catch {
-      detalle = null;
-    }
-    setEvaluacionSeleccionada({ ...evaluacion, detalle });
-    setPuntajeManual(evaluacion.score == null ? '' : String(evaluacion.score));
-  };
-
-  const calificarEvaluacion = async () => {
-    if (puntajeManual.trim() === '') {
-      setError('Ingresa un puntaje entre 0 y 100.');
-      return;
-    }
-    const score = Number(puntajeManual);
-    if (!Number.isFinite(score) || score < 0 || score > 100) {
-      setError('Ingresa un puntaje entre 0 y 100.');
-      return;
-    }
-
-    setCalificando(true);
+  const guardarAvance = async (event, item) => {
+    event.preventDefault();
+    setGuardandoEtapa(item.id);
     setError('');
+    setMensajeAvance('');
+    const appointment = citasPendientes[item.id] ?? {};
+    const processStage = etapasPendientes[item.id] ?? item.process_stage;
+    const hasAppointmentDetails = Object.values(appointment).some(Boolean);
+    if (hasAppointmentDetails && (
+      processStage !== 'interview'
+      || !appointment.date
+      || !appointment.time
+      || !appointment.modality
+      || !appointment.location?.trim()
+    )) {
+      setError('Completa fecha, hora, modalidad y lugar o enlace para publicar la citación.');
+      setGuardandoEtapa('');
+      return;
+    }
     try {
-      const { evaluation } = await apiRequest(`/evaluations/${evaluacionSeleccionada.id}/score`, {
+      await apiRequest(`/blind-selection/candidates/${item.id}/stage`, {
         method: 'PATCH',
-        body: JSON.stringify({ score }),
+        body: JSON.stringify({
+          processStage,
+          publicMessage: mensajesPendientes[item.id] ?? '',
+          ...(hasAppointmentDetails ? {
+            interviewDate: appointment.date ?? '',
+            interviewTime: appointment.time ?? '',
+            interviewModality: appointment.modality ?? '',
+            interviewLocation: appointment.location ?? '',
+          } : {}),
+        }),
       });
-      setEvaluaciones((current) => current.map((item) => (
-        item.id === evaluation.id ? { ...item, ...evaluation, score } : item
-      )));
-      setEvaluacionSeleccionada((current) => ({ ...current, score }));
+      setEtapasPendientes((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setMensajesPendientes((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setCitasPendientes((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setMensajeAvance(hasAppointmentDetails
+        ? `Cita de entrevista publicada para ${item.application_code}.`
+        : `Avance actualizado para ${item.application_code}.`);
+      await cargarDatos();
     } catch (requestError) {
       setError(requestError.message);
     } finally {
-      setCalificando(false);
+      setGuardandoEtapa('');
     }
   };
 
+  const registrarAvisoSimulado = async (event) => {
+    event.preventDefault();
+    if (!candidatoAviso || !mensajeAviso.trim() || !confirmarAviso) return;
+    setEnviandoAviso(true);
+    setError('');
+    setEstadoAviso('');
+    try {
+      const { notification } = await apiRequest(
+        `/blind-selection/candidates/${candidatoAviso}/simulated-notifications`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            message: mensajeAviso,
+            confirmSimulation: confirmarAviso,
+          }),
+        },
+      );
+      setAvisosSimulados((current) => [{
+        ...notification,
+        sender_name: user?.displayName ?? '',
+      }, ...current].slice(0, 100));
+      setMensajeAviso('');
+      setConfirmarAviso(false);
+      setEstadoAviso('Simulación registrada. No se envió ningún mensaje por WhatsApp.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setEnviandoAviso(false);
+    }
+  };
+
+  const fechaAvisoSimulado = (date) => date
+    ? new Intl.DateTimeFormat('es-PE', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'America/Lima',
+    }).format(new Date(date))
+    : 'Fecha no disponible';
+
   const preguntaActual = preguntas[indicePregunta];
-  const estaRespondida = (pregunta, indice) => pregunta.tipo === 'desarrollo'
-    ? Boolean(respuestas[indice]?.trim())
-    : respuestas[indice] !== undefined;
-  const contestadas = preguntas.filter(estaRespondida).length;
-  const primeraSinResponder = preguntas.findIndex((pregunta, indice) => !estaRespondida(pregunta, indice));
+  const preguntaRespondida = (indice) => preguntas[indice].tipo === 'opcion'
+    ? typeof respuestas[indice] === 'number'
+    : typeof respuestas[indice] === 'string' && respuestas[indice].trim().length > 0;
+  const contestadas = preguntas.filter((_, indice) => preguntaRespondida(indice)).length;
+  const primeraSinResponder = preguntas.findIndex((_, indice) => !preguntaRespondida(indice));
   const ultimaPreguntaAccesible = primeraSinResponder === -1
     ? preguntas.length - 1
     : primeraSinResponder;
-  const bloquearPortapapeles = (event) => event.preventDefault();
-  const bloquearAtajosDePortapapeles = (event) => {
-    if ((event.ctrlKey || event.metaKey) && ['c', 'v', 'x'].includes(event.key.toLowerCase())) {
-      event.preventDefault();
-    }
-    if (event.shiftKey && event.key === 'Insert') event.preventDefault();
+  const bloquearClipboard = (event) => event.preventDefault();
+  const bloquearAtajosClipboard = (event) => {
+    const tecla = event.key.toLowerCase();
+    const modificador = event.ctrlKey || event.metaKey;
+    const atajo = (modificador && ['c', 'v', 'x', 'insert'].includes(tecla))
+      || (event.shiftKey && tecla === 'insert');
+    if (atajo) event.preventDefault();
   };
 
-  useEffect(() => {
-    if (modo !== 'prueba') return undefined;
-
-    const bloquearEventoPortapapeles = (event) => event.preventDefault();
-    const bloquearAtajoPortapapeles = (event) => {
-      const tecla = event.key.toLowerCase();
-      if ((event.ctrlKey || event.metaKey) && ['c', 'v', 'x'].includes(tecla)) {
-        event.preventDefault();
-      }
-      if (event.shiftKey && event.key === 'Insert') event.preventDefault();
-    };
-
-    document.addEventListener('copy', bloquearEventoPortapapeles);
-    document.addEventListener('cut', bloquearEventoPortapapeles);
-    document.addEventListener('paste', bloquearEventoPortapapeles);
-    document.addEventListener('contextmenu', bloquearEventoPortapapeles);
-    document.addEventListener('selectstart', bloquearEventoPortapapeles);
-    document.addEventListener('keydown', bloquearAtajoPortapapeles);
-
-    return () => {
-      document.removeEventListener('copy', bloquearEventoPortapapeles);
-      document.removeEventListener('cut', bloquearEventoPortapapeles);
-      document.removeEventListener('paste', bloquearEventoPortapapeles);
-      document.removeEventListener('contextmenu', bloquearEventoPortapapeles);
-      document.removeEventListener('selectstart', bloquearEventoPortapapeles);
-      document.removeEventListener('keydown', bloquearAtajoPortapapeles);
-    };
-  }, [modo]);
-
   return (
-    <div className="flex h-screen bg-gray-100 text-gray-800 font-sans">
+    <div className="app-shell flex h-dvh flex-col bg-gray-100 font-sans text-gray-800 md:flex-row">
       <Sidebar />
 
-      <div className="flex-1 flex flex-col overflow-y-auto">
+      <div className="min-h-0 min-w-0 flex-1 flex flex-col overflow-y-auto">
         <header className="bg-white border-b px-4 sm:px-8 py-3 flex justify-between items-center gap-3">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold text-blue-950">SIPEC-MLA</h1>
@@ -298,7 +243,11 @@ export default function Evaluaciones() {
         </header>
 
         <main className="p-4 sm:p-8 space-y-6">
-          {error && <p role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+          {error && (
+            <div role="alert" className="rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
 
           {modo === 'historial' && (
             <>
@@ -316,8 +265,257 @@ export default function Evaluaciones() {
               </div>
 
               <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs leading-relaxed text-blue-950">
-                Cada examen queda asociado al puesto y a la solicitud; las respuestas de desarrollo quedan pendientes de revisión.
+                Las preguntas y sus claves deben verificarse con fuentes oficiales antes de usarse en evaluaciones reales.
               </div>
+
+              <section className="overflow-x-auto rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                <h3 className="mb-1 font-bold text-sm text-gray-900">Avance del proceso de selección</h3>
+                <p className="mb-4 text-xs text-gray-500">Las etapas y mensajes publicados aquí también estarán disponibles en el seguimiento del postulante.</p>
+                {mensajeAvance && <p role="status" className="mb-3 rounded bg-green-50 p-3 text-xs text-green-800">{mensajeAvance}</p>}
+                <table className="w-full min-w-[760px] text-left text-xs">
+                  <thead>
+                    <tr className="border-b text-gray-500">
+                      <th className="pb-3 font-medium">Código</th>
+                      <th className="pb-3 font-medium">Puesto</th>
+                      <th className="pb-3 font-medium">Etapa actual</th>
+                      {puedeActualizarAvance && <th className="pb-3 font-medium">Mensaje al postulante</th>}
+                      {puedeActualizarAvance && <th className="pb-3 font-medium">Acción</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {candidatos.map((item) => (
+                      <tr key={item.id}>
+                        <td className="py-3 font-bold text-blue-950">{item.application_code}</td>
+                        <td className="py-3 text-gray-700">{item.position_title}</td>
+                        <td className="py-3">
+                          {puedeActualizarAvance ? (
+                            <select
+                              aria-label={`Etapa de ${item.application_code}`}
+                              value={etapasPendientes[item.id] ?? item.process_stage}
+                              onChange={(event) => {
+                                setEtapasPendientes((current) => ({ ...current, [item.id]: event.target.value }));
+                                if (event.target.value !== 'interview') {
+                                  setCitasPendientes((current) => {
+                                    const next = { ...current };
+                                    delete next[item.id];
+                                    return next;
+                                  });
+                                }
+                                setMensajeAvance('');
+                              }}
+                              className="w-full rounded-lg border border-gray-300 bg-white p-2"
+                            >
+                              {etapasProceso.map((etapa) => <option key={etapa.value} value={etapa.value}>{etapa.label}</option>)}
+                            </select>
+                          ) : (
+                            etapasProceso.find((etapa) => etapa.value === item.process_stage)?.label ?? item.process_stage
+                          )}
+                        </td>
+                        {puedeActualizarAvance && (
+                          <>
+                            <td className="py-3">
+                              <input
+                                type="text"
+                                maxLength={500}
+                                aria-label={`Mensaje público para ${item.application_code}`}
+                                placeholder="Opcional"
+                                value={mensajesPendientes[item.id] ?? ''}
+                                onChange={(event) => {
+                                  setMensajesPendientes((current) => ({ ...current, [item.id]: event.target.value }));
+                                  setMensajeAvance('');
+                                }}
+                                className="w-full rounded-lg border border-gray-300 p-2"
+                              />
+                              {(etapasPendientes[item.id] ?? item.process_stage) === 'interview' && (
+                                <div className="mt-2 space-y-2 rounded-lg bg-blue-50 p-2">
+                                  <p className="font-semibold text-blue-950">Citación de entrevista (opcional)</p>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <input
+                                      type="date"
+                                      aria-label={`Fecha de entrevista para ${item.application_code}`}
+                                      min={fechaActualLima()}
+                                      value={citasPendientes[item.id]?.date ?? ''}
+                                      onChange={(event) => {
+                                        setCitasPendientes((current) => ({
+                                          ...current,
+                                          [item.id]: { ...current[item.id], date: event.target.value },
+                                        }));
+                                        setMensajeAvance('');
+                                      }}
+                                      className="min-w-0 w-full rounded-lg border border-gray-300 p-2"
+                                    />
+                                    <input
+                                      type="time"
+                                      aria-label={`Hora de entrevista para ${item.application_code}`}
+                                      value={citasPendientes[item.id]?.time ?? ''}
+                                      onChange={(event) => {
+                                        setCitasPendientes((current) => ({
+                                          ...current,
+                                          [item.id]: { ...current[item.id], time: event.target.value },
+                                        }));
+                                        setMensajeAvance('');
+                                      }}
+                                      className="min-w-0 w-full rounded-lg border border-gray-300 p-2"
+                                    />
+                                  </div>
+                                  <select
+                                    aria-label={`Modalidad de entrevista para ${item.application_code}`}
+                                    value={citasPendientes[item.id]?.modality ?? ''}
+                                    onChange={(event) => {
+                                      setCitasPendientes((current) => ({
+                                        ...current,
+                                        [item.id]: { ...current[item.id], modality: event.target.value },
+                                      }));
+                                      setMensajeAvance('');
+                                    }}
+                                    className="w-full rounded-lg border border-gray-300 bg-white p-2"
+                                  >
+                                    <option value="">Modalidad</option>
+                                    <option value="in_person">Presencial</option>
+                                    <option value="virtual">Virtual</option>
+                                  </select>
+                                  <input
+                                    type="text"
+                                    maxLength={500}
+                                    aria-label={`Lugar o enlace de entrevista para ${item.application_code}`}
+                                    placeholder={citasPendientes[item.id]?.modality === 'virtual' ? 'Enlace o instrucciones' : 'Lugar de la entrevista'}
+                                    value={citasPendientes[item.id]?.location ?? ''}
+                                    onChange={(event) => {
+                                      setCitasPendientes((current) => ({
+                                        ...current,
+                                        [item.id]: { ...current[item.id], location: event.target.value },
+                                      }));
+                                      setMensajeAvance('');
+                                    }}
+                                    className="w-full rounded-lg border border-gray-300 p-2"
+                                  />
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3">
+                              <form onSubmit={(event) => guardarAvance(event, item)}>
+                                <button
+                                  type="submit"
+                                  disabled={guardandoEtapa === item.id}
+                                  className="rounded-lg bg-blue-950 px-3 py-2 font-semibold text-white hover:bg-blue-900 disabled:bg-gray-400"
+                                >
+                                  {guardandoEtapa === item.id ? 'Guardando…' : 'Guardar'}
+                                </button>
+                              </form>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                    {!cargando && candidatos.length === 0 && (
+                      <tr><td colSpan={puedeActualizarAvance ? '5' : '3'} className="py-6 text-center text-gray-500">Aún no hay postulantes registrados.</td></tr>
+                    )}
+                    {cargando && (
+                      <tr><td colSpan={puedeActualizarAvance ? '5' : '3'} className="py-6 text-center text-gray-500">Cargando postulantes…</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </section>
+
+              {puedeActualizarAvance && (
+                <section className="grid gap-5 lg:grid-cols-2">
+                  <form
+                    onSubmit={registrarAvisoSimulado}
+                    className="space-y-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+                  >
+                    <div>
+                      <h3 className="font-bold text-sm text-gray-900">Simulación de aviso por WhatsApp</h3>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Prepara el mensaje y registra la simulación cuando RR. HH. decida. No se conecta a WhatsApp ni se envía al postulante.
+                      </p>
+                    </div>
+                    <label className="block text-xs font-semibold text-gray-700">
+                      Postulante
+                      <select
+                        required
+                        value={candidatoAviso}
+                        onChange={(event) => {
+                          setCandidatoAviso(event.target.value);
+                          setEstadoAviso('');
+                        }}
+                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white p-2"
+                      >
+                        <option value="">Selecciona un código</option>
+                        {candidatos.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.application_code} · {item.position_title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block text-xs font-semibold text-gray-700">
+                      Mensaje
+                      <textarea
+                        required
+                        maxLength={1000}
+                        rows={4}
+                        value={mensajeAviso}
+                        onChange={(event) => {
+                          setMensajeAviso(event.target.value);
+                          setEstadoAviso('');
+                        }}
+                        placeholder="Escribe el aviso que se registrará en esta simulación…"
+                        className="mt-1 w-full resize-y rounded-lg border border-gray-300 p-2 font-normal"
+                      />
+                    </label>
+                    <label className="flex items-start gap-2 text-xs text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={confirmarAviso}
+                        onChange={(event) => {
+                          setConfirmarAviso(event.target.checked);
+                          setEstadoAviso('');
+                        }}
+                        className="mt-0.5"
+                      />
+                      Confirmo registrar solo una simulación; no se enviará un WhatsApp real.
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={enviandoAviso || !candidatoAviso || !mensajeAviso.trim() || !confirmarAviso}
+                      className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:cursor-not-allowed disabled:bg-gray-400"
+                    >
+                      {enviandoAviso ? 'Registrando…' : 'Registrar envío simulado'}
+                    </button>
+                    {estadoAviso && <p role="status" className="text-xs text-emerald-800">{estadoAviso}</p>}
+                  </form>
+
+                  <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                    <div>
+                      <h3 className="font-bold text-sm text-gray-900">Historial de avisos simulados</h3>
+                      <p className="mt-1 text-xs text-gray-500">Registro interno; no representa una entrega real.</p>
+                    </div>
+                    {avisosSimulados.length === 0 ? (
+                      <p className="rounded-lg bg-gray-50 p-4 text-xs text-gray-600">Aún no hay simulaciones registradas.</p>
+                    ) : (
+                      <ul className="max-h-96 space-y-3 overflow-y-auto">
+                        {avisosSimulados.map((notification) => (
+                          <li key={notification.id} className="rounded-lg border border-gray-200 p-3 text-xs">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <p className="font-bold text-blue-950">
+                                {notification.application_code} · {notification.position_title}
+                              </p>
+                              <span className="rounded bg-amber-100 px-2 py-0.5 font-semibold text-amber-900">
+                                Simulado · sin envío real
+                              </span>
+                            </div>
+                            <p className="mt-1 text-[11px] text-gray-500">
+                              {fechaAvisoSimulado(notification.created_at)}
+                              {notification.sender_name ? ` · Registrado por ${notification.sender_name}` : ''}
+                            </p>
+                            <p className="mt-2 whitespace-pre-wrap text-gray-700">{notification.message}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                </section>
+              )}
 
               <section className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
                 <h3 className="mb-4 font-bold text-sm text-gray-900">Historial de evaluaciones</h3>
@@ -326,141 +524,74 @@ export default function Evaluaciones() {
                     <thead>
                       <tr className="text-gray-400 border-b">
                         <th className="pb-3 font-medium">Cód. Eval</th>
-                        <th className="pb-3 font-medium">Candidato (ciego)</th>
+                        <th className="pb-3 font-medium">Postulante</th>
                         <th className="pb-3 font-medium">Puesto</th>
                         <th className="pb-3 font-medium">Fecha</th>
                         <th className="pb-3 font-medium">Puntaje</th>
                         <th className="pb-3 font-medium">Estado</th>
-                        <th className="pb-3 font-medium">Respuestas</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {evaluaciones.map((evaluacion) => (
-                        <tr key={evaluacion.id} className="hover:bg-gray-50">
-                          <td className="py-3 font-bold text-blue-950">{evaluacion.id.slice(0, 8)}</td>
-                          <td className="py-3 font-mono font-bold text-gray-800">{evaluacion.candidate_name || evaluacion.worker_name || '—'}</td>
-                          <td className="py-3 text-gray-700">{evaluacion.position_title || evaluacion.evaluation_name}</td>
-                          <td className="py-3 text-gray-500">{new Date(evaluacion.created_at).toLocaleDateString('es-PE')}</td>
-                          <td className="py-3 font-bold text-blue-900">{evaluacion.score ?? '—'} / 100</td>
+                      {candidatos.filter((item) => item.exam_id).map((evaluacion) => {
+                        const estado = Number(evaluacion.objective_score) < 100
+                          ? 'No superó la valla'
+                          : evaluacion.written_review_status === 'rejected'
+                            ? 'Desarrollo no aprobado'
+                            : evaluacion.identity_revealed
+                              ? 'Valla superada'
+                              : 'Pendiente de revisión';
+                        return (
+                        <tr key={evaluacion.exam_id} className="hover:bg-gray-50">
+                          <td className="py-3 font-bold text-blue-950">
+                            {evaluacion.application_code}
+                            {evaluacion.is_demo && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-900">PRUEBA</span>}
+                          </td>
+                          <td className="py-3 font-mono font-bold text-gray-800">
+                            {evaluacion.identity_revealed ? (
+                              <>
+                                {evaluacion.full_name}
+                                {evaluacion.has_resume && (
+                                  <a
+                                    href={`/api/blind-selection/candidates/${evaluacion.id}/resume`}
+                                    className="mt-1 block font-sans text-[10px] font-semibold text-blue-800 hover:underline"
+                                  >
+                                    Descargar CV
+                                  </a>
+                                )}
+                              </>
+                            ) : 'Identidad protegida'}
+                          </td>
+                          <td className="py-3 text-gray-700">{evaluacion.position_title}</td>
+                          <td className="py-3 text-gray-500">
+                            {evaluacion.submitted_at ? new Date(evaluacion.submitted_at).toLocaleDateString('es-PE') : '—'}
+                          </td>
+                          <td className="py-3 font-bold text-blue-900">{evaluacion.objective_score} / 100</td>
                           <td className="py-3">
                             <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                              evaluacion.score == null ? 'bg-amber-100 text-amber-800' :
-                              Number(evaluacion.score) >= puntajeMinimo ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                              estado === 'Valla superada' ? 'bg-emerald-100 text-emerald-800' :
+                              estado === 'No superó la valla' || estado === 'Desarrollo no aprobado'
+                                ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
                             }`}>
-                              {evaluacion.score == null ? 'Pendiente' : Number(evaluacion.score) >= puntajeMinimo ? 'Aprobado' : 'Desaprobado'}
+                              {estado}
                             </span>
                           </td>
-                          <td className="py-3">
-                            <button
-                              type="button"
-                              onClick={() => revisarEvaluacion(evaluacion)}
-                              className="font-semibold text-blue-900 underline"
-                            >
-                              Revisar
-                            </button>
+                        </tr>
+                        );
+                      })}
+                      {!cargando && candidatos.every((item) => !item.exam_id) && (
+                        <tr>
+                          <td colSpan="6" className="py-6 text-center text-gray-500">
+                            Aún no hay evaluaciones registradas.
                           </td>
                         </tr>
-                      ))}
-                      {!cargando && evaluaciones.length === 0 && (
-                        <tr><td colSpan="7" className="py-8 text-center text-gray-500">No hay evaluaciones registradas.</td></tr>
                       )}
-                      {cargando && <tr><td colSpan="7" className="py-8 text-center text-gray-500">Cargando evaluaciones…</td></tr>}
+                      {cargando && (
+                        <tr><td colSpan="6" className="py-6 text-center text-gray-500">Cargando evaluaciones…</td></tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
               </section>
-
-              {evaluacionSeleccionada && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-                  <section
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="revision-evaluacion-titulo"
-                    className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
-                  >
-                    <div className="flex items-start justify-between gap-4 border-b pb-4">
-                      <div>
-                        <h3 id="revision-evaluacion-titulo" className="font-bold text-gray-900">Respuestas del examen</h3>
-                        <p className="mt-1 text-xs text-gray-600">
-                          {evaluacionSeleccionada.candidate_name || 'Postulante'} · {evaluacionSeleccionada.position_title || evaluacionSeleccionada.evaluation_name}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setEvaluacionSeleccionada(null)}
-                        aria-label="Cerrar revisión"
-                        className="text-xl text-gray-500 hover:text-gray-900"
-                      >
-                        ×
-                      </button>
-                    </div>
-                    {evaluacionSeleccionada.detalle?.respuestasObjetivas ? (
-                      <div className="mt-5 space-y-6 text-sm">
-                        <section>
-                          <h4 className="font-semibold text-gray-900">Opción múltiple</h4>
-                          <ol className="mt-3 list-decimal space-y-3 pl-5">
-                            {evaluacionSeleccionada.detalle.respuestasObjetivas.map((respuesta, indice) => (
-                              <li key={`objetiva-${indice}`}>
-                                <p className="font-medium">{respuesta.pregunta}</p>
-                                <p className={respuesta.correcta ? 'mt-1 text-emerald-700' : 'mt-1 text-red-700'}>
-                                  Respuesta: {respuesta.respuesta || 'Sin respuesta'}{respuesta.correcta ? ' (correcta)' : ' (incorrecta)'}
-                                </p>
-                              </li>
-                            ))}
-                          </ol>
-                        </section>
-                        <section>
-                          <h4 className="font-semibold text-gray-900">
-                            Desarrollo — {evaluacionSeleccionada.score == null ? 'pendiente de calificación' : `puntaje ${evaluacionSeleccionada.score}/100`}
-                          </h4>
-                          <ol className="mt-3 list-decimal space-y-4 pl-5">
-                            {evaluacionSeleccionada.detalle.respuestasDesarrollo.map((respuesta, indice) => (
-                              <li key={`desarrollo-${indice}`}>
-                                <p className="font-medium">{respuesta.pregunta}</p>
-                                <p className="mt-1 whitespace-pre-wrap rounded-lg bg-gray-50 p-3 text-gray-700">
-                                  {respuesta.respuesta || 'Sin respuesta'}
-                                </p>
-                              </li>
-                            ))}
-                          </ol>
-                        </section>
-                      </div>
-                    ) : (
-                      <p className="mt-5 whitespace-pre-wrap text-sm text-gray-700">
-                        {evaluacionSeleccionada.notes || 'Esta evaluación no tiene respuestas registradas.'}
-                      </p>
-                    )}
-                    {evaluacionSeleccionada.score == null && (
-                      <div className="mt-6 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-end">
-                        <div>
-                          <label htmlFor="puntaje-evaluacion" className="mb-1 block text-xs font-semibold text-gray-700">
-                            Puntaje final (0–100)
-                          </label>
-                          <input
-                            id="puntaje-evaluacion"
-                            type="number"
-                            required
-                            min="0"
-                            max="100"
-                            step="0.01"
-                            value={puntajeManual}
-                            onChange={(event) => setPuntajeManual(event.target.value)}
-                            className="w-full rounded-lg border px-3 py-2 text-sm sm:w-40"
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={calificarEvaluacion}
-                          disabled={calificando}
-                          className="rounded-lg bg-blue-950 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-900 disabled:opacity-50"
-                        >
-                          {calificando ? 'Guardando…' : 'Guardar calificación'}
-                        </button>
-                      </div>
-                    )}
-                  </section>
-                </div>
-              )}
             </>
           )}
 
@@ -474,51 +605,45 @@ export default function Evaluaciones() {
                 ← Volver al historial
               </button>
               <h2 className="text-xl font-bold text-gray-900">Preparar evaluación técnica</h2>
-              <p className="mt-1 text-xs text-gray-500">Asocia la prueba con una solicitud y usa el código anónimo del postulante.</p>
+              <p className="mt-1 text-xs text-gray-500">Usa el código anónimo del postulante para respetar la selección ciega.</p>
 
               <form onSubmit={iniciarEvaluacion} className="mt-5 space-y-4 text-xs">
                 <div>
-                  <label htmlFor="solicitud-evaluar" className="mb-1 block font-semibold text-gray-700">
-                    Solicitud de cobertura
+                  <label htmlFor="codigo-candidato" className="mb-1 block font-semibold text-gray-700">
+                    Postulante (código ciego)
                   </label>
                   <select
-                    id="solicitud-evaluar"
+                    id="codigo-candidato"
                     required
-                    value={solicitudId}
-                    onChange={(event) => setSolicitudId(event.target.value)}
-                    className="w-full rounded-lg border border-gray-300 p-2.5"
+                    value={candidato}
+                    className="w-full rounded-lg border border-gray-300 bg-white p-2.5"
+                    disabled={cargando}
+                    onChange={(event) => setCandidato(event.target.value)}
                   >
-                    <option value="">Selecciona una solicitud</option>
-                    {solicitudes.filter((request) => evaluacionesPorPuesto[request.position_title]).map((request) => (
-                      <option key={request.id} value={request.id}>
-                        {request.code} — {request.position_title}
+                    <option value="">Selecciona un postulante</option>
+                    {candidatos.filter((item) => !item.exam_id).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.application_code} · {item.position_title}
                       </option>
                     ))}
                   </select>
-                  {solicitudes.every((request) => !evaluacionesPorPuesto[request.position_title]) && (
-                    <p className="mt-2 text-amber-700">No hay solicitudes para los puestos con examen configurado.</p>
-                  )}
                 </div>
-                <div>
-                  <label htmlFor="codigo-candidato" className="mb-1 block font-semibold text-gray-700">
-                    Código del postulante
-                  </label>
-                  <input
-                    id="codigo-candidato"
-                    type="text"
-                    required
-                    value={candidato}
-                    onChange={(event) => setCandidato(event.target.value)}
-                    placeholder="Ej. Postulante #004"
-                    className="w-full rounded-lg border border-gray-300 p-2.5"
-                  />
-                </div>
+                {bancoSeleccionado && (
+                  <p className="rounded-lg bg-blue-50 p-3 text-blue-950">
+                    Puesto: {puesto} · Unidad orgánica: {bancoSeleccionado.gerencia}
+                  </p>
+                )}
+                {candidatoSeleccionado && !bancoSeleccionado && (
+                  <p role="alert" className="rounded-lg bg-amber-50 p-3 text-amber-900">
+                    No hay un banco de evaluación configurado para el puesto de esta solicitud.
+                  </p>
+                )}
                 <div className="rounded-lg bg-gray-50 p-3 leading-relaxed text-gray-600">
-                  El examen del puesto seleccionado tiene 20 preguntas: 15 de opción múltiple y 5 de desarrollo. Las respuestas de desarrollo quedan pendientes de revisión.
+                  La identidad permanece protegida. Para superar la valla se requiere 100% en opción múltiple y aprobación de todas las respuestas de desarrollo.
                 </div>
                 <button
                   type="submit"
-                  disabled={solicitudes.every((request) => !evaluacionesPorPuesto[request.position_title])}
+                  disabled={!candidatoSeleccionado || !bancoSeleccionado || enviando}
                   className="w-full rounded-lg bg-blue-950 px-4 py-2.5 font-bold text-white hover:bg-blue-900 disabled:cursor-not-allowed disabled:bg-gray-400"
                 >
                   Comenzar evaluación
@@ -528,15 +653,7 @@ export default function Evaluaciones() {
           )}
 
           {modo === 'prueba' && (
-            <section
-              className="mx-auto w-full max-w-4xl space-y-5"
-              onCopy={bloquearPortapapeles}
-              onCut={bloquearPortapapeles}
-              onPaste={bloquearPortapapeles}
-              onContextMenu={bloquearPortapapeles}
-              onKeyDown={bloquearAtajosDePortapapeles}
-              style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
-            >
+            <section className="mx-auto w-full max-w-4xl space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <button
                   type="button"
@@ -555,17 +672,17 @@ export default function Evaluaciones() {
                   <div>
                     <p className="text-xs font-semibold text-blue-900">Evaluación técnica dinámica</p>
                     <h2 className="mt-1 text-lg font-bold text-gray-900">{puesto}</h2>
-                    <p className="mt-1 text-xs text-gray-500">15 preguntas de opción múltiple · 5 preguntas de desarrollo</p>
+                    <p className="mt-1 text-xs text-gray-500">Competencia: Normativa y procedimientos</p>
                   </div>
                   <span className="rounded-lg bg-gray-100 px-3 py-2 text-xs font-mono text-gray-700">
-                    {candidato}
+                    {candidatoSeleccionado?.application_code}
                   </span>
                 </div>
 
                 <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs leading-relaxed text-blue-950">
                   <p className="font-bold">Instrucciones de la evaluación</p>
                   <p className="mt-1">
-                    Responde todas las preguntas para finalizar. No está permitido copiar, cortar ni pegar durante el examen. Las respuestas de desarrollo serán revisadas posteriormente.
+                    Responde cada pregunta para avanzar. No escribas tu nombre ni otros datos personales en las respuestas abiertas. Copiar o cortar el contenido de las preguntas y pegar texto en las respuestas está deshabilitado durante la prueba. Puedes volver a revisar tus respuestas; las preguntas escritas se calificarán manualmente al finalizar.
                   </p>
                 </div>
 
@@ -589,49 +706,60 @@ export default function Evaluaciones() {
                   </div>
                 </div>
 
-                <fieldset className="mt-7">
-                  <legend className="text-base font-semibold leading-relaxed text-gray-900">
-                    <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-blue-800">
-                      {preguntaActual.tipo === 'opcion_multiple' ? 'Opción múltiple' : 'Desarrollo'}
-                    </span>
+                <fieldset
+                  className="mt-7 select-none"
+                  onCopy={bloquearClipboard}
+                  onCut={bloquearClipboard}
+                  onContextMenu={bloquearClipboard}
+                  onDragStart={bloquearClipboard}
+                  onKeyDown={bloquearAtajosClipboard}
+                >
+                  <legend className="select-none text-base font-semibold leading-relaxed text-gray-900">
                     {preguntaActual.texto}
                   </legend>
-                  {preguntaActual.tipo === 'opcion_multiple' ? <div className="mt-5 space-y-3">
-                    {preguntaActual.opciones.map((opcion, indiceOpcion) => (
-                      <label
-                        key={opcion}
-                        className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition-colors ${
-                          respuestas[indicePregunta] === indiceOpcion
-                            ? 'border-blue-500 bg-blue-50'
-                            : 'border-gray-200 hover:bg-gray-50'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name={`pregunta-${indicePregunta}`}
-                          value={indiceOpcion}
-                          checked={respuestas[indicePregunta] === indiceOpcion}
-                          onChange={() => setRespuestas((actuales) => ({ ...actuales, [indicePregunta]: indiceOpcion }))}
-                          className="mt-0.5 accent-blue-900"
-                        />
-                        <span>{opcion}</span>
+                  {preguntaActual.tipo === 'opcion' ? (
+                    <div className="mt-5 space-y-3">
+                      {preguntaActual.opciones.map((opcion, indiceOpcion) => (
+                        <label
+                          key={opcion}
+                          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition-colors ${
+                            respuestas[indicePregunta] === indiceOpcion
+                              ? 'border-blue-500 bg-blue-50'
+                              : 'border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name={`pregunta-${indicePregunta}`}
+                            value={indiceOpcion}
+                            checked={respuestas[indicePregunta] === indiceOpcion}
+                            onChange={() => setRespuestas({ ...respuestas, [indicePregunta]: indiceOpcion })}
+                            className="mt-0.5 accent-blue-900"
+                          />
+                          <span>{opcion}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-5">
+                      <label htmlFor={`respuesta-escrita-${indicePregunta}`} className="mb-2 block text-xs font-semibold text-gray-700">
+                        Escribe tu respuesta
                       </label>
-                    ))}
-                  </div> : (
-                    <textarea
-                      value={respuestas[indicePregunta] || ''}
-                      onChange={(event) => setRespuestas((actuales) => ({ ...actuales, [indicePregunta]: event.target.value }))}
-                      maxLength={4000}
-                      rows={8}
-                      aria-label={`Respuesta de desarrollo para la pregunta ${indicePregunta + 1}`}
-                      placeholder="Escribe tu respuesta..."
-                      onCopy={bloquearPortapapeles}
-                      onCut={bloquearPortapapeles}
-                      onPaste={bloquearPortapapeles}
-                      onContextMenu={bloquearPortapapeles}
-                      style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
-                      className="mt-5 w-full rounded-lg border border-gray-300 p-3 text-sm focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                    />
+                      <textarea
+                        id={`respuesta-escrita-${indicePregunta}`}
+                        rows={5}
+                        maxLength={2000}
+                        required
+                        value={respuestas[indicePregunta] ?? ''}
+                        onChange={(event) => setRespuestas({ ...respuestas, [indicePregunta]: event.target.value })}
+                        onPaste={bloquearClipboard}
+                        placeholder="Desarrolla tu respuesta..."
+                        className="w-full rounded-lg border border-gray-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
+                      />
+                      <p className="mt-1 text-right text-[10px] text-gray-500">
+                        {(respuestas[indicePregunta] ?? '').length} / 2000 caracteres
+                      </p>
+                    </div>
                   )}
                 </fieldset>
 
@@ -664,7 +792,7 @@ export default function Evaluaciones() {
                       <button
                         type="button"
                         onClick={() => setIndicePregunta((actual) => Math.min(preguntas.length - 1, actual + 1))}
-                        disabled={!estaRespondida(preguntaActual, indicePregunta)}
+                        disabled={!preguntaRespondida(indicePregunta)}
                         className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:cursor-not-allowed disabled:bg-gray-400"
                       >
                         Siguiente →
@@ -673,10 +801,14 @@ export default function Evaluaciones() {
                       <button
                         type="button"
                         onClick={finalizarEvaluacion}
-                        disabled={contestadas < preguntas.length || guardando}
+                        disabled={contestadas < preguntas.length || enviando}
                         className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:cursor-not-allowed disabled:bg-gray-400"
                       >
-                        {guardando ? 'Guardando evaluación…' : contestadas < preguntas.length ? 'Completa todas las preguntas' : 'Finalizar evaluación'}
+                        {enviando
+                          ? 'Guardando resultado…'
+                          : contestadas < preguntas.length
+                            ? 'Completa todas las preguntas'
+                            : 'Finalizar evaluación'}
                       </button>
                     )}
                   </div>
@@ -690,14 +822,14 @@ export default function Evaluaciones() {
                     type="button"
                     onClick={() => setIndicePregunta(indice)}
                     disabled={indice > ultimaPreguntaAccesible}
-                    aria-label={`Ir a la pregunta ${indice + 1}${estaRespondida(preguntas[indice], indice) ? ', respondida' : ''}${marcadas.includes(indice) ? ', marcada para revisar' : ''}`}
+                    aria-label={`Ir a la pregunta ${indice + 1}${respuestas[indice] !== undefined ? ', respondida' : ''}${marcadas.includes(indice) ? ', marcada para revisar' : ''}`}
                     aria-current={indicePregunta === indice ? 'step' : undefined}
                     className={`h-9 w-9 rounded-lg text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40 ${
                       indicePregunta === indice
                         ? 'bg-blue-950 text-white'
                         : marcadas.includes(indice)
                           ? 'border border-amber-300 bg-amber-50 text-amber-800'
-                          : estaRespondida(preguntas[indice], indice)
+                          : respuestas[indice] !== undefined
                             ? 'border border-emerald-300 bg-emerald-50 text-emerald-800'
                             : 'border border-gray-300 bg-white text-gray-600'
                     }`}
@@ -711,26 +843,41 @@ export default function Evaluaciones() {
 
           {modo === 'resultado' && resultado && (
             <section className="mx-auto w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm sm:p-10">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-amber-100 text-2xl font-extrabold text-amber-700">
-                ✓
+              <div className={`mx-auto flex h-16 w-16 items-center justify-center rounded-full text-2xl font-extrabold ${
+                resultado.estado === 'Valla superada' ? 'bg-emerald-100 text-emerald-700' :
+                  resultado.estado === 'Desaprobado' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+              }`}>
+                {resultado.estado === 'Valla superada' ? '✓' : resultado.estado === 'Desaprobado' ? '×' : '…'}
               </div>
-              <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-gray-500">Evaluación entregada</p>
-              <h2 className="mt-1 text-3xl font-extrabold text-amber-700">PENDIENTE DE REVISIÓN</h2>
-              <p className="mt-2 text-sm text-gray-700">{candidato} · {puesto}</p>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-gray-500">Resultado de evaluación</p>
+              <h2 className={`mt-1 text-3xl font-extrabold ${
+                resultado.estado === 'Valla superada' ? 'text-emerald-700' :
+                  resultado.estado === 'Desaprobado' ? 'text-red-700' : 'text-amber-700'
+              }`}>
+                {resultado.estado === 'Pendiente de revisión' ? 'PENDIENTE DE REVISIÓN' :
+                  resultado.estado === 'Valla superada' ? 'VALLA SUPERADA' : 'NO APTO'}
+              </h2>
+              <p className="mt-2 text-sm text-gray-700">{candidatoSeleccionado?.application_code} · {puesto}</p>
 
-              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="rounded-lg bg-gray-50 p-4">
-                  <p className="text-xs text-gray-500">Alternativas correctas (referencial)</p>
-                  <p className="mt-1 text-2xl font-bold text-blue-950">{resultado.correctas} / 15</p>
+                  <p className="text-xs text-gray-500">Puntaje objetivo (opción múltiple)</p>
+                  <p className="mt-1 text-2xl font-bold text-blue-950">{resultado.puntaje} / 100</p>
                 </div>
                 <div className="rounded-lg bg-gray-50 p-4">
-                  <p className="text-xs text-gray-500">Respuestas de desarrollo</p>
-                  <p className="mt-1 text-2xl font-bold text-blue-950">5 pendientes de revisión</p>
+                  <p className="text-xs text-gray-500">Respuestas objetivas correctas</p>
+                  <p className="mt-1 text-2xl font-bold text-blue-950">{resultado.correctas} / {cantidadObjetivas}</p>
+                </div>
+                <div className="rounded-lg bg-gray-50 p-4">
+                  <p className="text-xs text-gray-500">Respuestas abiertas</p>
+                  <p className="mt-1 text-2xl font-bold text-blue-950">{cantidadEscritas} pendientes de revisión</p>
                 </div>
               </div>
 
               <p className="mt-5 text-xs leading-relaxed text-gray-500">
-                Tus respuestas fueron registradas. El resultado final se definirá después de revisar las respuestas de desarrollo.
+                {resultado.estado === 'Pendiente de revisión'
+                  ? 'El puntaje perfecto objetivo queda registrado. La identidad seguirá protegida hasta que una persona evaluadora apruebe todas las respuestas de desarrollo.'
+                  : 'El resultado se guardó. El postulante no alcanzó el puntaje máximo exigido y su identidad permanece protegida.'}
               </p>
               <button
                 type="button"

@@ -4,7 +4,6 @@ import Login from './pages/Login';
 import PortalPostulacion from './pages/PortalPostulacion';
 import Dashboard from './pages/Dashboard';
 import SolicitudesCobertura from './pages/SolicitudesCobertura';
-import NuevaSolicitudPOI from './pages/NuevaSolicitudPOI';
 import PerfilPuesto from './pages/PerfilPuesto';
 import PerfilPuestoDetalle from './pages/PerfilPuestoDetalle';
 import MiPerfil from './pages/MiPerfil';
@@ -16,57 +15,40 @@ import Evaluacion from './pages/Evaluacion';
 import Informes from './pages/Informes';
 import Auditoria from './pages/Auditoria';
 import Configuracion from './pages/Configuracion';
-import { AuthProvider } from './components/AuthContext';
-import ProtectedRoute from './components/ProtectedRoute';
-import { moduleRoles } from './lib/rolePermissions';
+import { AuthProvider } from './auth/AuthContext';
+import ProtectedRoute from './auth/ProtectedRoute';
+import ProtectedRole from './auth/ProtectedRole';
+
+const ADMIN_RRHH = ['admin', 'hr_specialist'];
+const ADMIN_RRHH_JEFE = [...ADMIN_RRHH, 'area_manager'];
+const TODOS_LOS_ROLES = ADMIN_RRHH_JEFE;
 
 function App() {
   return (
-    <Router>
-      <AuthProvider>
-       <Routes>
-       <Route path="/" element={<Login />} />
-       <Route path="/postular" element={<PortalPostulacion />} />
-       <Route element={<ProtectedRoute roles={moduleRoles.dashboard} />}>
-         <Route path="/dashboard" element={<Dashboard />} />
-         <Route path="/mi-perfil" element={<MiPerfil />} />
-       </Route>
-       <Route element={<ProtectedRoute roles={moduleRoles.requests} />}>
-         <Route path="/solicitudes-cobertura" element={<SolicitudesCobertura />} />
-         <Route path="/nueva-solicitud" element={<SolicitudesCobertura />} />
-       </Route>
-       <Route element={<ProtectedRoute roles={moduleRoles.profiles} />}>
-         <Route path="/perfil-puesto" element={<PerfilPuesto />} />
-         <Route path="/perfil-puesto/detalle/:id" element={<PerfilPuestoDetalle />} />
-         <Route path="/perfil-puesto/detalle" element={<PerfilPuestoDetalle />} />
-       </Route>
-       <Route element={<ProtectedRoute roles={moduleRoles.candidates} />}>
-         <Route path="/candidatos-compatibles" element={<CandidatosCompatibles />} />
-       </Route>
-       <Route element={<ProtectedRoute roles={moduleRoles.workers} />}>
-         <Route path="/trabajadores" element={<Trabajadores />} />
-         <Route path="/trabajadores/expediente" element={<ExpedienteTrabajador />} />
-       </Route>
-       <Route element={<ProtectedRoute roles={moduleRoles.documents} />}>
-         <Route path="/validacion-ocr" element={<ValidacionOCR />} />
-       </Route>
-       <Route element={<ProtectedRoute roles={moduleRoles.evaluations} />}>
-         <Route path="/evaluacion" element={<Evaluacion />} />
-         <Route path="/evaluaciones" element={<Evaluacion />} />
-       </Route>
-       <Route element={<ProtectedRoute roles={moduleRoles.reports} />}>
-         <Route path="/informes" element={<Informes />} />
-       </Route>
-       <Route element={<ProtectedRoute roles={moduleRoles.audit} />}>
-         <Route path="/auditoria" element={<Auditoria />} />
-       </Route>
-       <Route element={<ProtectedRoute roles={moduleRoles.settings} />}>
-         <Route path="/configuracion" element={<Configuracion />} />
-       </Route>
-       <Route path="*" element={<Navigate to="/" />} />
-       </Routes>
-      </AuthProvider>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <Routes>
+          <Route path="/" element={<Login />} />
+          <Route path="/postular" element={<PortalPostulacion />} />
+          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/solicitudes-cobertura" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><SolicitudesCobertura /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/nueva-solicitud" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><SolicitudesCobertura /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/perfil-puesto" element={<ProtectedRoute><ProtectedRole roles={TODOS_LOS_ROLES}><PerfilPuesto /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/perfil-puesto/detalle/:id" element={<ProtectedRoute><ProtectedRole roles={TODOS_LOS_ROLES}><PerfilPuestoDetalle /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/mi-perfil" element={<ProtectedRoute><MiPerfil /></ProtectedRoute>} />
+          <Route path="/candidatos-compatibles" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH}><CandidatosCompatibles /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/trabajadores" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><Trabajadores /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/trabajadores/expediente" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><ExpedienteTrabajador /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/validacion-ocr" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH}><ValidacionOCR /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/evaluacion" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH}><Evaluacion /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/evaluaciones" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH}><Evaluacion /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/informes" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><Informes /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/auditoria" element={<ProtectedRoute><ProtectedRole roles={['admin']}><Auditoria /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/configuracion" element={<ProtectedRoute><ProtectedRole roles={['admin']}><Configuracion /></ProtectedRole></ProtectedRoute>} />
+          <Route path="*" element={<Navigate to="/" />} />
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }
 
