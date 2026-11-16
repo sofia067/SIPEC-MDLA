@@ -133,9 +133,9 @@ function Login() {
             </button>
           </form>
           <p className="mt-5 text-center text-xs text-gray-500">
-            ¿Vas a realizar una demostración?{' '}
+            ¿Eres postulante?{' '}
             <Link to="/postular" className="font-semibold text-blue-800 hover:underline">
-              Ir al portal de postulaciones de prueba
+              Entra aquí
             </Link>
           </p>
         </div>

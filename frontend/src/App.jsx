@@ -1,7 +1,8 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
-import PortalPostulacion from './pages/PortalPostulacion';
+import PortalPostulante from './pages/PortalPostulante';
+import LoginPostulante from './pages/LoginPostulante';
 import Dashboard from './pages/Dashboard';
 import SolicitudesCobertura from './pages/SolicitudesCobertura';
 import PerfilPuesto from './pages/PerfilPuesto';
@@ -12,12 +13,15 @@ import Trabajadores from './pages/Trabajadores';
 import ExpedienteTrabajador from './pages/ExpedienteTrabajador';
 import ValidacionOCR from './pages/ValidacionOCR';
 import Evaluacion from './pages/Evaluacion';
+import ExamenPostulante from './pages/ExamenPostulante';
 import Informes from './pages/Informes';
 import Auditoria from './pages/Auditoria';
 import Configuracion from './pages/Configuracion';
 import { AuthProvider } from './auth/AuthContext';
 import ProtectedRoute from './auth/ProtectedRoute';
 import ProtectedRole from './auth/ProtectedRole';
+import ProtectedCandidateRoute from './auth/ProtectedCandidateRoute';
+import { CandidateAuthProvider } from './auth/CandidateAuthContext';
 
 const ADMIN_RRHH = ['admin', 'hr_specialist'];
 const ADMIN_RRHH_JEFE = [...ADMIN_RRHH, 'area_manager'];
@@ -26,10 +30,12 @@ const TODOS_LOS_ROLES = ADMIN_RRHH_JEFE;
 function App() {
   return (
     <AuthProvider>
+      <CandidateAuthProvider>
       <Router>
         <Routes>
           <Route path="/" element={<Login />} />
-          <Route path="/postular" element={<PortalPostulacion />} />
+          <Route path="/postulante/login" element={<LoginPostulante />} />
+          <Route path="/postular" element={<PortalPostulante />} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/solicitudes-cobertura" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><SolicitudesCobertura /></ProtectedRole></ProtectedRoute>} />
           <Route path="/nueva-solicitud" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><SolicitudesCobertura /></ProtectedRole></ProtectedRoute>} />
@@ -41,13 +47,15 @@ function App() {
           <Route path="/trabajadores/expediente" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><ExpedienteTrabajador /></ProtectedRole></ProtectedRoute>} />
           <Route path="/validacion-ocr" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH}><ValidacionOCR /></ProtectedRole></ProtectedRoute>} />
           <Route path="/evaluacion" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH}><Evaluacion /></ProtectedRole></ProtectedRoute>} />
-          <Route path="/evaluaciones" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH}><Evaluacion /></ProtectedRole></ProtectedRoute>} />
+          <Route path="/evaluaciones" element={<ProtectedCandidateRoute><ExamenPostulante /></ProtectedCandidateRoute>} />
+          <Route path="/postulante/examen-tecnico" element={<ProtectedCandidateRoute><ExamenPostulante /></ProtectedCandidateRoute>} />
           <Route path="/informes" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><Informes /></ProtectedRole></ProtectedRoute>} />
           <Route path="/auditoria" element={<ProtectedRoute><ProtectedRole roles={['admin']}><Auditoria /></ProtectedRole></ProtectedRoute>} />
           <Route path="/configuracion" element={<ProtectedRoute><ProtectedRole roles={['admin']}><Configuracion /></ProtectedRole></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Router>
+      </CandidateAuthProvider>
     </AuthProvider>
   );
 }
