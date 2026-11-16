@@ -1,39 +1,60 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { apiRequest } from '../services/api';
 
 export default function ModalNotificacionWhatsApp({ candidato, etapa, onCerrar }) {
-  const [mensaje, setMensaje] = useState('');
+  const [mensaje, setMensaje] = useState(() => {
+    if (!candidato || etapa !== 'exam') return '';
+    const enlaceExamen = `${window.location.origin}/postulante/examen-tecnico`;
+    return `Hola ${candidato.full_name || candidato.fullName || 'Postulante'}, te saludamos de RR.HH. de la Municipalidad de Los Aquijes (SIPEC-MLA). ` +
+      `Has avanzado a la etapa de EVALUACIÓN para el puesto de ${candidato.position_title || candidato.positionTitle}. ` +
+      `Ingresa con tu código de postulación y la contraseña provisional que aparecen abajo: ${enlaceExamen}`;
+  });
+  const [error, setError] = useState('');
+  const [generandoCredenciales, setGenerandoCredenciales] = useState(false);
+  const [urlWhatsApp, setUrlWhatsApp] = useState('');
   
   // Buscamos el teléfono en cualquiera de los nombres posibles que pueda venir de la API
   const telefonoOriginal = candidato?.phone || candidato?.telefono || candidato?.celular || '';
   const [telefonoInput, setTelefonoInput] = useState(telefonoOriginal);
 
   const telefonoLimpio = telefonoInput.replace(/\D/g, '');
-  const numeroWhatsApp = telefonoLimpio.startsWith('51') ? telefonoLimpio : `51${telefonoLimpio}`;
 
-  useEffect(() => {
-    if (candidato) {
-      const tel = candidato?.phone || candidato?.telefono || candidato?.celular || '';
-      setTelefonoInput(tel);
+  const abrirWhatsApp = async () => {
+    if (urlWhatsApp) {
+      window.open(urlWhatsApp, '_blank', 'noopener,noreferrer');
+      onCerrar();
+      return;
     }
-
-    if (!candidato) return;
-
-    if (etapa === 'exam') {
-      const enlaceExamen = `${window.location.origin}/postulante/examen-tecnico`;
-      setMensaje(
-        `Hola ${candidato.full_name || candidato.fullName || 'Postulante'}, te saludamos de RR.HH. de la Municipalidad de Los Aquijes (SIPEC-MLA). ` +
-        `Has avanzado a la etapa de EVALUACIÓN para el puesto de ${candidato.position_title || candidato.positionTitle}. ` +
-        `Por favor ingresa al siguiente enlace para rendir tu examen con tu correo registrado: ${enlaceExamen}`
-      );
-    } else if (etapa === 'interview') {
-      setMensaje('');
+    setError('');
+    setGenerandoCredenciales(true);
+    const whatsappWindow = window.open('about:blank', '_blank');
+    if (whatsappWindow) whatsappWindow.opener = null;
+    try {
+      let mensajeFinal = mensaje;
+      let telefonoDestino = telefonoInput;
+      if (etapa === 'exam') {
+        const { credentials } = await apiRequest(`/blind-selection/candidates/${candidato.id}/exam-credentials`, {
+          method: 'POST',
+          body: JSON.stringify({ phone: telefonoInput || undefined }),
+        });
+        mensajeFinal += `\n\nCódigo de postulación: ${credentials.applicationCode}\nContraseña provisional: ${credentials.temporaryPassword}`;
+        telefonoDestino = credentials.phone;
+      }
+      const destinationDigits = telefonoDestino.replace(/\D/g, '');
+      const destinationNumber = destinationDigits.startsWith('51') ? destinationDigits : `51${destinationDigits}`;
+      const url = `https://wa.me/${destinationNumber}?text=${encodeURIComponent(mensajeFinal)}`;
+      if (whatsappWindow) {
+        whatsappWindow.location.href = url;
+        onCerrar();
+      } else {
+        setUrlWhatsApp(url);
+      }
+    } catch (requestError) {
+      whatsappWindow?.close();
+      setError(requestError.message || 'No se pudo preparar la notificación.');
+    } finally {
+      setGenerandoCredenciales(false);
     }
-  }, [candidato, etapa]);
-
-  const abrirWhatsApp = () => {
-    const url = `https://wa.me/${numeroWhatsApp}?text=${encodeURIComponent(mensaje)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
-    onCerrar();
   };
 
   if (!candidato) return null;
@@ -47,6 +68,11 @@ export default function ModalNotificacionWhatsApp({ candidato, etapa, onCerrar }
         <p className="mt-1 text-[11px] text-slate-500">
           Código: <strong>{candidato.application_code}</strong>
         </p>
+        {etapa === 'exam' && (
+          <p className="mt-2 rounded-md bg-amber-50 p-2 text-[11px] text-amber-900">
+            Se generará una contraseña temporal al preparar el mensaje. WhatsApp se abrirá con el texto listo; debes confirmar el envío manualmente.
+          </p>
+        )}
 
         {/* Campo para ingresar o corregir el número si no viene de la base de datos */}
         <div className="mt-3">
@@ -86,6 +112,18 @@ export default function ModalNotificacionWhatsApp({ candidato, etapa, onCerrar }
           />
         </div>
 
+        {error && <p role="alert" className="mt-3 rounded bg-red-50 p-2 text-[11px] text-red-700">{error}</p>}
+        {urlWhatsApp && (
+          <a
+            href={urlWhatsApp}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-block font-semibold text-emerald-700 underline"
+          >
+            Volver a abrir WhatsApp con las credenciales preparadas
+          </a>
+        )}
+
         <div className="mt-5 flex justify-end gap-3">
           <button
             type="button"
@@ -96,11 +134,11 @@ export default function ModalNotificacionWhatsApp({ candidato, etapa, onCerrar }
           </button>
           <button
             type="button"
-            disabled={!mensaje.trim() || telefonoLimpio.length < 9}
+            disabled={!mensaje.trim() || (etapa !== 'exam' && telefonoLimpio.length < 9) || (telefonoLimpio.length > 0 && telefonoLimpio.length < 9) || generandoCredenciales}
             onClick={abrirWhatsApp}
             className="rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-300"
           >
-            Abrir WhatsApp Web
+            {generandoCredenciales ? 'Preparando…' : 'Abrir WhatsApp Web'}
           </button>
         </div>
       </div>

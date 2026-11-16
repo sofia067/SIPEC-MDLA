@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sipec_mla
+      POSTGRES_USER: sipec
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sipec-local-change-me}
+    ports:
+      - "5435:5432"
+    volumes:
+      - sipec-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sipec -d sipec_mla"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      UPLOADS_DIR: /app/uploads
+      DATABASE_URL: postgres://sipec:${POSTGRES_PASSWORD:-sipec-local-change-me}@postgres:5432/sipec_mla
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-AdminLocal-Strong-2026!}
+      ADMIN_DISPLAY_NAME: ${ADMIN_DISPLAY_NAME:-Administrador SIPEC}
+      AREA_MANAGER_USERNAME: ${AREA_MANAGER_USERNAME:-kimberly.cisneros}
+      AREA_MANAGER_DISPLAY_NAME: ${AREA_MANAGER_DISPLAY_NAME:-Kimberly Cisneros}
+      AREA_MANAGER_AREA: ${AREA_MANAGER_AREA:-Gerencia de Administración Tributativa}
+      AREA_MANAGER_PASSWORD: ${AREA_MANAGER_PASSWORD:-AreaManager-Strong-2026!}
+      HR_SPECIALIST_USERNAME: ${HR_SPECIALIST_USERNAME:-rrhh.especialista}
+      HR_SPECIALIST_DISPLAY_NAME: ${HR_SPECIALIST_DISPLAY_NAME:-Sofia}
+      HR_SPECIALIST_PASSWORD: ${HR_SPECIALIST_PASSWORD:-RecursosHumanos-Strong-2026!}
+      PUBLIC_APPLICATION_PRIVACY_NOTICE_URL: ${PUBLIC_APPLICATION_PRIVACY_NOTICE_URL:-}
+      PUBLIC_APPLICATION_PRIVACY_NOTICE_VERSION: ${PUBLIC_APPLICATION_PRIVACY_NOTICE_VERSION:-}
+      CONVOCATORIAS_API_URL: ${CONVOCATORIAS_API_URL:-https://www.gob.pe/institucion/munilosaquijes/noticias}
+      CONVOCATORIAS_API_TOKEN: ${CONVOCATORIAS_API_TOKEN:-}
+      CONVOCATORIAS_SYNC_MINUTES: ${CONVOCATORIAS_SYNC_MINUTES:-60}
+    ports:
+      - "3001:3000"
+    volumes:
+      - sipec-uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+
+volumes:
+  sipec-postgres:
+  sipec-uploads:

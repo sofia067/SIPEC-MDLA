@@ -1,98 +1,53 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { ROLES } from '../config/roles';
+import { apiRequest } from '../services/api';
 
-const SESSION_KEY = 'sipec_candidate_demo_session';
-const ACCOUNTS_KEY = 'sipec_candidate_demo_accounts';
 const CandidateAuthContext = createContext(null);
 
-function readAccounts() {
-  const savedAccounts = localStorage.getItem(ACCOUNTS_KEY);
-  if (!savedAccounts) return [];
-
-  try {
-    const accounts = JSON.parse(savedAccounts);
-    return Array.isArray(accounts) ? accounts : [];
-  } catch {
-    localStorage.removeItem(ACCOUNTS_KEY);
-    return [];
-  }
-}
-
-function readSession() {
-  const savedSession = sessionStorage.getItem(SESSION_KEY);
-  if (!savedSession) return null;
-
-  try {
-    const user = JSON.parse(savedSession);
-    if (user.role === ROLES.CANDIDATO && user.email && user.name && user.phone && user.documentNumber) return user;
-    sessionStorage.removeItem(SESSION_KEY);
-    return null;
-  } catch {
-    sessionStorage.removeItem(SESSION_KEY);
-    return null;
-  }
-}
-
-async function hashPassword(password, salt) {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({
-    name: 'PBKDF2',
-    salt: encoder.encode(salt),
-    iterations: 100000,
-    hash: 'SHA-256',
-  }, key, 256);
-  return Array.from(new Uint8Array(bits), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-function openSession(profile) {
-  const candidate = { ...profile, role: ROLES.CANDIDATO };
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(candidate));
-  return candidate;
-}
-
 export function CandidateAuthProvider({ children }) {
-  const [user, setUser] = useState(readSession);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
+
+  const refreshSession = useCallback(async () => {
+    setLoading(true);
+    setAuthError('');
+    try {
+      const { candidate } = await apiRequest('/candidate-auth/me');
+      setUser({ ...candidate, role: ROLES.CANDIDATO });
+    } catch (error) {
+      if (error.status === 401) {
+        setUser(null);
+      } else {
+        setAuthError(error.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshSession();
+  }, [refreshSession]);
+
   const value = useMemo(() => ({
     user,
-    async register({ name, email, phone, documentNumber, password }) {
-      const accounts = readAccounts();
-      const normalizedEmail = email.trim().toLowerCase();
-      if (accounts.some((account) => account.email === normalizedEmail)) {
-        throw new Error('Ya existe una cuenta de demostración con ese correo.');
-      }
-
-      const salt = crypto.randomUUID();
-      const passwordHash = await hashPassword(password, salt);
-      const profile = {
-        name: name.trim(),
-        email: normalizedEmail,
-        phone: phone.trim(),
-        documentNumber: documentNumber.trim(),
-      };
-      localStorage.setItem(ACCOUNTS_KEY, JSON.stringify([...accounts, { ...profile, salt, passwordHash }]));
-      setUser(openSession(profile));
+    loading,
+    authError,
+    refreshSession,
+    async login(applicationCode, password) {
+      const { candidate } = await apiRequest('/candidate-auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ applicationCode, password }),
+      });
+      setUser({ ...candidate, role: ROLES.CANDIDATO });
+      setAuthError('');
     },
-    async login(email, password) {
-      const normalizedEmail = email.trim().toLowerCase();
-      const account = readAccounts().find((savedAccount) => savedAccount.email === normalizedEmail);
-      if (!account) throw new Error('No encontramos una cuenta con ese correo. Crea una cuenta para continuar.');
-
-      const passwordHash = await hashPassword(password, account.salt);
-      if (passwordHash !== account.passwordHash) throw new Error('La contraseña no es correcta.');
-
-      setUser(openSession({
-        name: account.name,
-        email: account.email,
-        phone: account.phone,
-        documentNumber: account.documentNumber,
-      }));
-    },
-    logout() {
-      sessionStorage.removeItem(SESSION_KEY);
+    async logout() {
+      await apiRequest('/candidate-auth/logout', { method: 'POST' });
       setUser(null);
     },
-  }), [user]);
+  }), [user, loading, authError, refreshSession]);
 
   return <CandidateAuthContext.Provider value={value}>{children}</CandidateAuthContext.Provider>;
 }

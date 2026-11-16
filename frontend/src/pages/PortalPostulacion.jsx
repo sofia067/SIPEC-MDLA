@@ -8,7 +8,7 @@ const initialForm = {
   documentNumber: '',
   email: '',
   phone: '',
-  demoConfirmation: false,
+  privacyConsent: false,
 };
 const tiposDocumentoPostulacion = [
   { type: 'professional_title', label: 'Título profesional' },
@@ -27,6 +27,7 @@ const etapasProceso = [
 
 export default function PortalPostulacion() {
   const [openings, setOpenings] = useState([]);
+  const [privacyNotice, setPrivacyNotice] = useState(null);
   const [form, setForm] = useState(initialForm);
   const [resume, setResume] = useState(null);
   const [additionalDocuments, setAdditionalDocuments] = useState({});
@@ -78,8 +79,11 @@ export default function PortalPostulacion() {
   useEffect(() => {
     let active = true;
     apiRequest('/public/applications/openings')
-      .then(({ openings: availableOpenings }) => {
-        if (active) setOpenings(availableOpenings);
+      .then(({ openings: availableOpenings, privacyNotice: currentPrivacyNotice }) => {
+        if (active) {
+          setOpenings(availableOpenings);
+          setPrivacyNotice(currentPrivacyNotice);
+        }
       })
       .catch((requestError) => {
         if (active) setError(requestError.message);
@@ -131,8 +135,9 @@ export default function PortalPostulacion() {
     try {
       const body = new FormData();
       Object.entries(form).forEach(([key, value]) => {
-        body.append(key, key === 'demoConfirmation' ? String(value) : value);
+        body.append(key, key === 'privacyConsent' ? String(value) : value);
       });
+      body.append('privacyNoticeVersion', privacyNotice.version);
       if (resume) body.append('resume', resume);
       Object.entries(additionalDocuments).forEach(([type, files]) => {
         files.forEach((file) => body.append(type, file));
@@ -185,7 +190,7 @@ export default function PortalPostulacion() {
             <img src="/AquijesLogo.jpg" alt="Logo Los Aquijes" className="h-12 w-12 rounded-lg bg-white/10 object-contain p-1" />
             <div>
               <p className="font-bold tracking-wide">SIPEC-MLA</p>
-              <p className="text-xs text-blue-200">Portal de postulaciones</p>
+              <p className="text-xs text-blue-200">Convocatorias de Recursos Humanos</p>
             </div>
           </div>
           <Link to="/" className="rounded-lg px-3 py-2 text-sm font-medium text-blue-100 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
@@ -197,13 +202,13 @@ export default function PortalPostulacion() {
       <div className="mx-auto grid max-w-6xl gap-8 px-5 py-8 lg:grid-cols-[0.85fr_1.15fr] lg:py-12">
         <section>
           <span className="inline-flex rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-900">
-            Demostración académica
+            Canal oficial de postulación
           </span>
           <h1 className="mt-5 text-3xl font-bold leading-tight text-blue-950 sm:text-4xl">
-            Simula tu postulación
+            Postula a una convocatoria
           </h1>
           <p className="mt-4 max-w-xl leading-relaxed text-slate-600">
-            Este portal de prueba muestra cómo una persona podría postular a una convocatoria y recibir un código de seguimiento.
+            Revisa las convocatorias vigentes de Recursos Humanos y envía tus documentos para participar en el proceso de selección.
           </p>
 
           <div className="mt-8 space-y-4">
@@ -217,15 +222,15 @@ export default function PortalPostulacion() {
             <div className="flex gap-3">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-900">2</span>
               <div>
-                <p className="font-semibold text-slate-800">Completa los datos de prueba</p>
-                <p className="mt-1 text-sm text-slate-500">Adjunta un PDF ficticio de hasta 5 MB; el sistema estimará coincidencias de términos con los requisitos del puesto.</p>
+                <p className="font-semibold text-slate-800">Completa tus datos</p>
+                <p className="mt-1 text-sm text-slate-500">Adjunta tus documentos en los formatos y plazos indicados en cada convocatoria.</p>
               </div>
             </div>
             <div className="flex gap-3">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-900">3</span>
               <div>
                 <p className="font-semibold text-slate-800">Guarda tu código</p>
-                <p className="mt-1 text-sm text-slate-500">El registro aparecerá en la selección ciega del sistema interno.</p>
+                <p className="mt-1 text-sm text-slate-500">Recursos Humanos recibirá tu postulación en el sistema interno.</p>
               </div>
             </div>
           </div>
@@ -299,13 +304,12 @@ export default function PortalPostulacion() {
           {applicationCode ? (
             <div className="py-8 text-center">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-800" aria-hidden="true">✓</div>
-              <h2 className="mt-4 text-2xl font-bold text-blue-950">Postulación de prueba recibida</h2>
-              <p className="mt-2 text-sm text-slate-600">Guarda este código para identificar el registro en la demostración:</p>
+              <h2 className="mt-4 text-2xl font-bold text-blue-950">Postulación recibida</h2>
+              <p className="mt-2 text-sm text-slate-600">Guarda este código para identificar y consultar tu postulación:</p>
               <p className="mt-4 inline-flex rounded-lg bg-blue-50 px-5 py-3 font-mono text-xl font-bold tracking-wider text-blue-950">{applicationCode}</p>
-              <p className="mt-4 text-xs text-slate-500">Este código no representa una postulación oficial.</p>
               <p className="mt-2 text-xs text-slate-500">Para consultar tu avance, usa este código junto con el documento registrado en el panel de seguimiento.</p>
               <button type="button" onClick={startAnother} className="mt-7 rounded-lg bg-blue-950 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-950">
-                Registrar otra prueba
+                Registrar otra postulación
               </button>
             </div>
           ) : (
@@ -318,7 +322,12 @@ export default function PortalPostulacion() {
               ) : openings.length === 0 ? (
                 <div className="mt-6 rounded-lg bg-slate-50 p-5 text-sm text-slate-600">
                   <p className="font-semibold text-slate-800">No hay convocatorias aprobadas disponibles.</p>
-                  <p className="mt-1">Solicita al equipo de prueba que apruebe una convocatoria y registre una fecha límite futura desde el sistema interno.</p>
+                  <p className="mt-1">El equipo de Recursos Humanos publicará aquí las convocatorias vigentes.</p>
+                </div>
+              ) : !privacyNotice?.enabled ? (
+                <div role="alert" className="mt-6 rounded-lg border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950">
+                  <p className="font-semibold">El portal aún no está habilitado para recibir postulaciones.</p>
+                  <p className="mt-1">Recursos Humanos debe configurar el aviso de privacidad aprobado antes de recopilar datos personales o documentos.</p>
                 </div>
               ) : (
                 <form onSubmit={submitApplication} className="mt-6 space-y-5">
@@ -362,27 +371,27 @@ export default function PortalPostulacion() {
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="sm:col-span-2">
-                      <label htmlFor="fullName" className="mb-1.5 block text-sm font-semibold text-slate-700">Nombres y apellidos ficticios</label>
-                      <input id="fullName" name="fullName" value={form.fullName} onChange={updateField} autoComplete="off" required minLength={3} maxLength={160} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="Ejemplo: Alex Prueba Demo" />
+                      <label htmlFor="fullName" className="mb-1.5 block text-sm font-semibold text-slate-700">Nombres y apellidos</label>
+                      <input id="fullName" name="fullName" value={form.fullName} onChange={updateField} autoComplete="name" required minLength={3} maxLength={160} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="Tal como figura en tu documento" />
                     </div>
                     <div>
-                      <label htmlFor="documentNumber" className="mb-1.5 block text-sm font-semibold text-slate-700">Documento ficticio</label>
-                      <input id="documentNumber" name="documentNumber" value={form.documentNumber} onChange={updateField} autoComplete="off" required minLength={6} maxLength={24} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="Solo valor de prueba" />
+                      <label htmlFor="documentNumber" className="mb-1.5 block text-sm font-semibold text-slate-700">Número de documento de identidad</label>
+                      <input id="documentNumber" name="documentNumber" value={form.documentNumber} onChange={updateField} autoComplete="off" required minLength={6} maxLength={24} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="DNI o documento de viaje" />
                     </div>
                     <div>
-                      <label htmlFor="phone" className="mb-1.5 block text-sm font-semibold text-slate-700">Teléfono ficticio</label>
-                      <input id="phone" name="phone" type="tel" value={form.phone} onChange={updateField} autoComplete="off" maxLength={40} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="Opcional" />
+                      <label htmlFor="phone" className="mb-1.5 block text-sm font-semibold text-slate-700">Teléfono de contacto</label>
+                      <input id="phone" name="phone" type="tel" value={form.phone} onChange={updateField} autoComplete="tel" maxLength={40} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="Opcional" />
                     </div>
                     <div className="sm:col-span-2">
-                      <label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-slate-700">Correo ficticio</label>
-                      <input id="email" name="email" type="email" value={form.email} onChange={updateField} autoComplete="off" maxLength={254} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="demo@example.test" />
+                      <label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-slate-700">Correo electrónico</label>
+                      <input id="email" name="email" type="email" value={form.email} onChange={updateField} autoComplete="email" maxLength={254} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="Opcional" />
                     </div>
                   </div>
 
                   <div>
-                    <label htmlFor="resume" className="mb-1.5 block text-sm font-semibold text-slate-700">Currículum ficticio en PDF</label>
+                    <label htmlFor="resume" className="mb-1.5 block text-sm font-semibold text-slate-700">Currículum en PDF</label>
                     <input key={fileInputKey} id="resume" name="resume" type="file" accept="application/pdf,.pdf" required onChange={(event) => setResume(event.target.files?.[0] ?? null)} className="block w-full rounded-lg border border-slate-300 text-sm file:mr-4 file:border-0 file:bg-blue-50 file:px-4 file:py-2.5 file:font-semibold file:text-blue-900 hover:file:bg-blue-100" />
-                    <p className="mt-1 text-xs text-slate-500">Solo PDF, máximo 5 MB. No adjuntes documentos reales.</p>
+                    <p className="mt-1 text-xs text-slate-500">Solo PDF, máximo 5 MB.</p>
                   </div>
 
                   {selectedOpening?.application_documents?.length > 0 && (
@@ -414,7 +423,7 @@ export default function PortalPostulacion() {
                             <p className="mt-1 text-xs text-slate-500">
                               {additionalDocuments[type]?.length
                                 ? `${additionalDocuments[type].length} archivo(s) seleccionado(s)`
-                                : 'PDF ficticio; no adjuntes documentos reales.'}
+                                : 'Archivo PDF, máximo 5 MB.'}
                             </p>
                           </div>
                         );
@@ -423,12 +432,18 @@ export default function PortalPostulacion() {
                   )}
 
                   <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">
-                    <input name="demoConfirmation" type="checkbox" checked={form.demoConfirmation} onChange={updateField} required className="mt-1 h-4 w-4 shrink-0 accent-blue-900" />
-                    <span>Confirmo que todos los datos y archivos son ficticios y que envío esta información únicamente para una demostración académica.</span>
+                    <input name="privacyConsent" type="checkbox" checked={form.privacyConsent} onChange={updateField} required className="mt-1 h-4 w-4 shrink-0 accent-blue-900" />
+                    <span>
+                      He leído el{' '}
+                      <a href={privacyNotice.url} target="_blank" rel="noreferrer" className="font-semibold text-blue-800 underline">
+                        Aviso de Privacidad
+                      </a>{' '}
+                      y autorizo el tratamiento de mis datos personales para gestionar esta postulación y las etapas del proceso de selección.
+                    </span>
                   </label>
 
                   <button type="submit" disabled={sending || loading} className="w-full rounded-lg bg-blue-950 px-5 py-3 font-semibold text-white transition hover:bg-blue-900 disabled:cursor-not-allowed disabled:bg-slate-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-950">
-                    {sending ? 'Enviando postulación de prueba…' : 'Enviar postulación de prueba'}
+                    {sending ? 'Enviando postulación…' : 'Enviar postulación'}
                   </button>
                 </form>
               )}
@@ -437,7 +452,7 @@ export default function PortalPostulacion() {
         </section>
       </div>
       <footer className="border-t border-slate-200 bg-white px-5 py-5 text-center text-xs text-slate-500">
-        Prototipo académico SIPEC-MLA · No es un canal oficial de postulación
+        SIPEC-MLA · Portal de postulaciones de Recursos Humanos
       </footer>
     </main>
   );

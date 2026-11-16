@@ -38,7 +38,6 @@ export default function Evaluaciones() {
   const [candidato, setCandidato] = useState('');
   const [indicePregunta, setIndicePregunta] = useState(0);
   const [respuestas, setRespuestas] = useState({});
-  const [marcadas, setMarcadas] = useState([]);
   const [resultado, setResultado] = useState(null);
   const [etapasPendientes, setEtapasPendientes] = useState({});
   const [mensajesPendientes, setMensajesPendientes] = useState({});
@@ -57,9 +56,6 @@ export default function Evaluaciones() {
   const puesto = candidatoSeleccionado?.position_title ?? '';
   const bancoSeleccionado = bancos.find((banco) => banco.puesto === puesto);
   const preguntas = bancoSeleccionado?.preguntas ?? [];
-  const cantidadObjetivas = preguntas.filter((pregunta) => pregunta.tipo === 'opcion').length;
-  const cantidadEscritas = preguntas.filter((pregunta) => pregunta.tipo === 'escrita').length;
-
   const cargarDatos = async () => {
     const [candidateResult, bankResult, noticeResult] = await Promise.all([
       apiRequest('/blind-selection/candidates'),
@@ -77,12 +73,20 @@ export default function Evaluaciones() {
       .finally(() => setCargando(false));
   }, []);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        cargarDatos().catch((requestError) => setError(requestError.message));
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
   const iniciarEvaluacion = (event) => {
     event.preventDefault();
     if (!candidatoSeleccionado || !bancoSeleccionado) return;
     setIndicePregunta(0);
     setRespuestas({});
-    setMarcadas([]);
     setError('');
     setModo('prueba');
   };
@@ -93,40 +97,28 @@ export default function Evaluaciones() {
     try {
       const respuestasFormateadas = preguntas.map((pregunta, index) => {
         if (pregunta.tipo === 'escrita') {
-          return respuestas[index] || 'Sin respuesta';
+          return respuestas[index] || '';
         }
         return respuestas[index] ?? '';
       });
-   let puntajeObtenido = 90;
-      try {
       const { exam } = await apiRequest(`/blind-selection/candidates/${candidato}/exam`, {
-          method: 'POST',
-          body: JSON.stringify({ answers: respuestasFormateadas }),
-        });
-        puntajeObtenido = Number(exam?.objective_score ?? 90);
-      } catch (e) {
-       
-        puntajeObtenido = 90;
-      }
-
-      const estadoFinal = puntajeObtenido >= 80 ? 'Pendiente de revisión' : 'Desaprobado';
-      
-      setResultado({ correctas: cantidadObjetivas, puntaje: puntajeObtenido, estado: estadoFinal });
-
-      // Actualizamos inmediatamente el estado de candidatos para que aparezca en el ranking y en la tabla
-      setCandidatos((prevCandidatos) =>
-        prevCandidatos.map((item) =>
-          item.id === candidato
-            ? {
-                ...item,
-                exam_id: 'exam-' + Date.now(),
-                objective_score: puntajeObtenido,
-                submitted_at: new Date().toISOString(),
-              }
-            : item
-        )
-      );
+        method: 'POST',
+        body: JSON.stringify({ answers: respuestasFormateadas }),
+      });
+      const puntajeObtenido = Number(exam.objective_score);
+      const estadoFinal = puntajeObtenido === 100 ? 'Pendiente de revisión' : 'Desaprobado';
+      setResultado({
+        correctas: exam.correct_answers,
+        totalObjetivas: exam.total_objective_questions,
+        puntaje: puntajeObtenido,
+        estado: estadoFinal,
+      });
       setModo('resultado');
+      try {
+        await cargarDatos();
+      } catch (refreshError) {
+        setError(`El examen se guardó, pero no se pudo actualizar el ranking: ${refreshError.message}`);
+      }
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -194,15 +186,19 @@ export default function Evaluaciones() {
       setMensajeAvance(hasAppointmentDetails
         ? `Cita de entrevista publicada para ${item.application_code}.`
         : `Avance actualizado para ${item.application_code}.`);
-      await cargarDatos();
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setGuardandoEtapa('');
       if (processStage === 'exam' || processStage === 'interview') {
         setCandidatoWhatsApp(item);
         setEtapaWhatsApp(processStage);
       }
+      try {
+        await cargarDatos();
+      } catch (refreshError) {
+        setError(`El avance se guardó, pero no se pudo actualizar la lista: ${refreshError.message}`);
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setGuardandoEtapa('');
     }
   };
 
@@ -399,7 +395,11 @@ export default function Evaluaciones() {
                   {puestosUnicos.map((puestoItem) => {
                     const top3Puesto = evaluacionesConExamen
                       .filter((item) => item.position_title === puestoItem)
-                      .sort((a, b) => Number(b.objective_score || 0) - Number(a.objective_score || 0))
+                      .sort((a, b) => (
+                        Number(b.objective_score || 0) - Number(a.objective_score || 0)
+                        || new Date(a.submitted_at) - new Date(b.submitted_at)
+                        || a.application_code.localeCompare(b.application_code)
+                      ))
                       .slice(0, 3);
 
                     const medallas = ['🥇 1er Lugar', '🥈 2do Lugar', '🥉 3er Lugar'];
@@ -441,9 +441,18 @@ export default function Evaluaciones() {
               <section className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm mt-6">
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-4">
                   <h3 className="font-bold text-sm text-gray-900">Historial de evaluaciones general (Ranking)</h3>
-                  <span className="text-[11px] font-medium bg-blue-50 text-blue-800 px-2.5 py-1 rounded-full">
-                    Ordenado de mayor a menor puntaje
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium bg-blue-50 text-blue-800 px-2.5 py-1 rounded-full">
+                      Ordenado de mayor a menor puntaje
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => cargarDatos().catch((requestError) => setError(requestError.message))}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+                    >
+                      Actualizar
+                    </button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[680px] text-left text-xs border-collapse">
@@ -460,7 +469,11 @@ export default function Evaluaciones() {
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {evaluacionesConExamen
-                        .sort((a, b) => Number(b.objective_score || 0) - Number(a.objective_score || 0))
+                        .sort((a, b) => (
+                          Number(b.objective_score || 0) - Number(a.objective_score || 0)
+                          || new Date(a.submitted_at) - new Date(b.submitted_at)
+                          || a.application_code.localeCompare(b.application_code)
+                        ))
                         .map((evaluacion, index) => {
                           const estado = Number(evaluacion.objective_score) < 100
                             ? 'No superó la valla'
@@ -596,7 +609,7 @@ export default function Evaluaciones() {
                 {preguntas[indicePregunta]?.tipo === 'opcion' ? (
                   <div className="space-y-2.5 pt-2">
                     {(preguntas[indicePregunta].opciones || []).map((opcion, idxOpcion) => {
-                      const seleccionada = respuestas[indicePregunta] === opcion;
+                      const seleccionada = respuestas[indicePregunta] === idxOpcion;
                       return (
                         <label
                           key={idxOpcion}
@@ -610,7 +623,7 @@ export default function Evaluaciones() {
                             name={`pregunta-${indicePregunta}`}
                             checked={seleccionada}
                             onChange={() =>
-                              setRespuestas((prev) => ({ ...prev, [indicePregunta]: opcion }))
+                              setRespuestas((prev) => ({ ...prev, [indicePregunta]: idxOpcion }))
                             }
                             className="text-blue-900 focus:ring-blue-900" />
                           <span>{opcion}</span>
@@ -681,6 +694,9 @@ export default function Evaluaciones() {
                 </span>
                 <span className="mt-1 block text-3xl font-extrabold text-blue-950">
                   {resultado.puntaje} / 100
+                </span>
+                <span className="mt-1 block text-[11px] text-gray-500">
+                  Respuestas objetivas correctas: {resultado.correctas} de {resultado.totalObjetivas}
                 </span>
                 <span
                   className={`mt-2 inline-block rounded-full px-3 py-0.5 text-[11px] font-bold ${

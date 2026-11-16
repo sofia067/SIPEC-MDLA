@@ -5,8 +5,10 @@ import { authenticate } from '../middleware/authenticate.js';
 import { authorize } from '../middleware/authorize.js';
 import { uploadDocument } from '../middleware/upload.js';
 import { modulesRepository } from '../repositories/modules-repository.js';
+import { passwordResetRepository } from '../repositories/password-reset-repository.js';
 import { requestRepository } from '../repositories/request-repository.js';
 import { hashPassword } from '../security/password.js';
+import { candidateAuthService } from '../services/candidate-auth-service.js';
 import { documentService } from '../services/document-service.js';
 import { extractPdfMetadata, extractText } from '../services/ocr-service.js';
 import { assessDocumentReview } from '../services/document-review.js';
@@ -170,6 +172,9 @@ const candidateProcessStageSchema = z.object({
 const simulatedCandidateNotificationSchema = z.object({
   message: z.string().trim().min(1).max(1000),
   confirmSimulation: z.boolean().default(false),
+});
+const examCredentialsSchema = z.object({
+  phone: z.string().trim().min(9).max(40).regex(/^[+()\d\s-]+$/, 'El número telefónico no es válido.').optional(),
 });
 
 const requireId = (rawId) => {
@@ -442,6 +447,16 @@ export function createModuleRouter() {
     if (!notification) throw new AppError(404, 'CANDIDATE_NOT_FOUND', 'No se encontró al postulante.');
     res.status(201).json({ notification });
   });
+  router.post('/blind-selection/candidates/:id/exam-credentials', authorize('admin', 'hr_specialist'), async (req, res) => {
+    const { phone } = examCredentialsSchema.parse(req.body);
+    const credentials = await candidateAuthService.issueExamCredentials(
+      requireId(req.params.id),
+      req.user.id,
+      phone,
+      getAreaScope(req.user),
+    );
+    res.status(201).json({ credentials });
+  });
   router.post('/blind-selection/candidates/:id/match', authorize('admin', 'hr_specialist'), async (req, res, next) => {
     try {
       const candidateId = requireId(req.params.id);
@@ -565,6 +580,14 @@ export function createModuleRouter() {
 
   router.get('/settings/users', authorize('admin'), async (req, res) => {
     res.json({ users: await modulesRepository.listUsers() });
+  });
+  router.get('/settings/password-reset-requests', authorize('admin'), async (req, res) => {
+    res.json({ requests: await passwordResetRepository.listOpen() });
+  });
+  router.patch('/settings/password-reset-requests/:id/resolve', authorize('admin'), async (req, res) => {
+    const resolved = await passwordResetRepository.resolve(requireId(req.params.id), req.user.id);
+    if (!resolved) throw new AppError(404, 'PASSWORD_RESET_REQUEST_NOT_FOUND', 'La solicitud ya fue atendida o no existe.');
+    res.status(204).end();
   });
   router.get('/settings', authorize('admin'), async (req, res) => {
     res.json({ settings: await modulesRepository.getApplicationSettings() });

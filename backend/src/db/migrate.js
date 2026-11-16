@@ -25,7 +25,7 @@ async function migrate() {
 
     for (const file of files) {
       const sql = await readFile(new URL(`./migrations/${file}`, import.meta.url), 'utf8');
-      const checksum = createHash('sha256').update(sql).digest('hex');
+      const checksum = createHash('sha256').update(sql.replace(/\r\n?/g, '\n')).digest('hex');
       const existing = await client.query(
         'SELECT checksum FROM schema_migrations WHERE version = $1',
         [file],

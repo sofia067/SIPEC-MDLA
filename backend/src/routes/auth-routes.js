@@ -3,6 +3,7 @@ import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
 import { authenticate } from '../middleware/authenticate.js';
 import { modulesRepository } from '../repositories/modules-repository.js';
+import { passwordResetRepository } from '../repositories/password-reset-repository.js';
 import { authService } from '../services/auth-service.js';
 
 const loginSchema = z.object({
@@ -23,6 +24,9 @@ const passwordSchema = z.object({
   message: 'La nueva contraseña debe ser distinta a la actual.',
   path: ['newPassword'],
 });
+const passwordResetRequestSchema = z.object({
+  username: z.string().trim().min(1).max(80),
+});
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 10,
@@ -30,6 +34,15 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     error: { code: 'LOGIN_RATE_LIMIT', message: 'Demasiados intentos. Espera unos minutos e intenta nuevamente.' },
+  },
+});
+const passwordResetRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: {
+    error: { code: 'PASSWORD_RESET_RATE_LIMIT', message: 'Demasiadas solicitudes. Intenta nuevamente más tarde.' },
   },
 });
 const cookieOptions = (secure, maxAge) => ({
@@ -55,6 +68,18 @@ export function createAuthRouter({ secureCookies }) {
       }
       res.cookie('sipec_session', session.token, cookieOptions(secureCookies, session.expiresAt.getTime() - Date.now()));
       return res.json({ user: session.user });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/password-reset-requests', passwordResetRequestLimiter, async (req, res, next) => {
+    try {
+      const { username } = passwordResetRequestSchema.parse(req.body);
+      await passwordResetRepository.createForUsername(username);
+      return res.status(202).json({
+        message: 'Si la cuenta está activa, la solicitud fue enviada al administrador del sistema.',
+      });
     } catch (error) {
       return next(error);
     }

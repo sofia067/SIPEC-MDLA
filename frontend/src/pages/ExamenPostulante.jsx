@@ -1,10 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCandidateAuth } from '../auth/CandidateAuthContext';
 import { apiRequest } from '../services/api';
-
-// Banco de preguntas importado externamente
-import { EVALUATION_BANKS } from '../data/evaluation-banks.js';
 
 export default function ExamenPostulante() {
   const { user, logout } = useCandidateAuth();
@@ -16,90 +13,127 @@ export default function ExamenPostulante() {
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState(null);
   const [error, setError] = useState('');
-
   const [examenIniciado, setExamenIniciado] = useState(false);
-
-  // Temporizador de 30 minutos (1800 segundos)
   const [tiempoRestante, setTiempoRestante] = useState(1800);
+  const [fechaExpiracion, setFechaExpiracion] = useState(null);
+  const autoSubmitAttempted = useRef(false);
 
-  // Validación de autenticación del postulante
   useEffect(() => {
     if (!user) {
       navigate('/postulante/login', { replace: true });
     }
   }, [user, navigate]);
 
-  // Carga del examen
   useEffect(() => {
     const cargarExamen = async () => {
       try {
-        const puestoUsuario = user?.position_title || user?.puesto || '';
-        const bancoEncontrado = EVALUATION_BANKS.find(
-          (b) => b.puesto.toLowerCase() === puestoUsuario.toLowerCase()
-        ) || EVALUATION_BANKS[0];
-
-        setBanco({
-          puesto: bancoEncontrado?.puesto || 'Inspector Tributario y Orientador al Contribuyente',
-          preguntas: bancoEncontrado?.preguntas || []
-        });
-      } catch (err) {
-        setBanco({
-          puesto: EVALUATION_BANKS[0]?.puesto || 'Evaluación Técnica',
-          preguntas: EVALUATION_BANKS[0]?.preguntas || []
-        });
+        const { exam } = await apiRequest('/candidate-auth/exam');
+        if (exam.submitted) {
+          setResultado(exam);
+          return;
+        }
+        setBanco({ puesto: exam.positionTitle, preguntas: exam.questions });
+        setRespuestas(Object.fromEntries(
+          exam.draft.map((answer, index) => [index, answer ?? '']),
+        ));
+        if (exam.expiresAt) {
+          const expiresAt = new Date(exam.expiresAt);
+          setFechaExpiracion(expiresAt);
+          setTiempoRestante(Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 1000)));
+          setExamenIniciado(true);
+        }
+      } catch (requestError) {
+        setError(requestError.message || 'No se pudo cargar el examen.');
       } finally {
         setCargando(false);
       }
     };
-    cargarExamen();
+    if (user) cargarExamen();
   }, [user]);
 
-  const preguntas = banco?.preguntas ?? [];
+  const preguntas = useMemo(() => banco?.preguntas ?? [], [banco]);
   const preguntaActual = preguntas[indicePregunta];
 
-  // Función para finalizar el examen
-  const finalizarExamen = async (respuestasActuales) => {
+  const finalizarExamen = useCallback(async (respuestasActuales) => {
     if (enviando) return;
     setEnviando(true);
     setError('');
     try {
-      const response = await apiRequest(`/blind-selection/candidates/me/exam`, {
+      const response = await apiRequest('/candidate-auth/exam/submit', {
         method: 'POST',
-        body: JSON.stringify({ answers: preguntas.map((_, index) => respuestasActuales[index]) }),
+        body: JSON.stringify({
+          answers: preguntas.map((question, index) => (
+            respuestasActuales[index] === undefined
+              ? (question.tipo === 'opcion' ? null : '')
+              : respuestasActuales[index]
+          )),
+        }),
       });
       setResultado(response.exam);
-    } catch (err) {
-      setResultado({ objective_score: 85, status: 'Completado' });
+    } catch (requestError) {
+      setError(requestError.message || 'No se pudo registrar el examen. Intenta nuevamente.');
     } finally {
       setEnviando(false);
     }
+  }, [enviando, preguntas]);
+
+  useEffect(() => {
+    if (!examenIniciado || !fechaExpiracion || resultado) return undefined;
+    const interval = setInterval(() => {
+      setTiempoRestante(Math.max(0, Math.ceil((fechaExpiracion.getTime() - Date.now()) / 1000)));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [examenIniciado, fechaExpiracion, resultado]);
+
+  useEffect(() => {
+    if (!examenIniciado || tiempoRestante !== 0 || resultado || enviando || autoSubmitAttempted.current) return;
+    autoSubmitAttempted.current = true;
+    finalizarExamen(respuestas);
+  }, [tiempoRestante, examenIniciado, resultado, enviando, respuestas, finalizarExamen]);
+
+  useEffect(() => {
+    if (!examenIniciado || !fechaExpiracion || resultado) return undefined;
+    const timeout = setTimeout(async () => {
+      try {
+        await apiRequest('/candidate-auth/exam/draft', {
+          method: 'PUT',
+          body: JSON.stringify({
+            answers: preguntas.map((question, index) => (
+              respuestas[index] === undefined
+                ? (question.tipo === 'opcion' ? null : '')
+                : respuestas[index]
+            )),
+          }),
+        });
+      } catch (requestError) {
+        if (requestError.code !== 'EXAM_TIME_EXPIRED') setError(requestError.message);
+      }
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [respuestas, preguntas, examenIniciado, fechaExpiracion, resultado]);
+
+  const comenzarExamen = async () => {
+    setError('');
+    try {
+      const attempt = await apiRequest('/candidate-auth/exam/start', { method: 'POST' });
+      const expiresAt = new Date(attempt.expiresAt);
+      setFechaExpiracion(expiresAt);
+      setTiempoRestante(Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 1000)));
+      setRespuestas(Object.fromEntries(attempt.draft.map((answer, index) => [index, answer ?? ''])));
+      setExamenIniciado(true);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
   };
 
-  // Cronómetro activo que arranca al iniciar el examen
-  useEffect(() => {
-    if (!examenIniciado || resultado) return;
-
-    const interval = setInterval(() => {
-      setTiempoRestante((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [examenIniciado, resultado]);
-
-  // Envío automático si el tiempo llega a 0
-  useEffect(() => {
-    if (tiempoRestante === 0 && examenIniciado && !resultado && !enviando) {
-      finalizarExamen(respuestas);
+  const cerrarSesion = async () => {
+    try {
+      await logout();
+    } catch (requestError) {
+      setError(requestError.message);
     }
-  }, [tiempoRestante, examenIniciado, resultado, enviando, respuestas]);
+  };
 
-  // Formatear segundos a MM:SS
   const formatTiempo = (segundos) => {
     const mins = Math.floor(segundos / 60);
     const secs = segundos % 60;
@@ -127,7 +161,7 @@ export default function ExamenPostulante() {
             </div>
           </div>
           
-          <button onClick={logout} className="sm:hidden flex items-center gap-1.5 text-xs font-semibold text-red-600 hover:underline">
+          <button onClick={cerrarSesion} className="sm:hidden flex items-center gap-1.5 text-xs font-semibold text-red-600 hover:underline">
             <span>❌</span> Cerrar sesión
           </button>
         </div>
@@ -143,7 +177,7 @@ export default function ExamenPostulante() {
 
         
         <div className="hidden sm:flex justify-end">
-          <button onClick={logout} className="flex items-center gap-1.5 text-xs font-semibold text-red-600 hover:underline">
+          <button onClick={cerrarSesion} className="flex items-center gap-1.5 text-xs font-semibold text-red-600 hover:underline">
             <span>❌</span> Cerrar sesión
           </button>
         </div>
@@ -189,8 +223,9 @@ export default function ExamenPostulante() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setExamenIniciado(true)}
-                  className="w-full sm:w-auto rounded-xl bg-blue-950 px-6 py-3 text-xs font-bold text-white shadow-md hover:bg-blue-900 transition" >
+                  disabled={!banco || !preguntas.length}
+                  onClick={comenzarExamen}
+                  className="w-full sm:w-auto rounded-xl bg-blue-950 px-6 py-3 text-xs font-bold text-white shadow-md hover:bg-blue-900 transition disabled:cursor-not-allowed disabled:bg-slate-400" >
                   Comenzar Evaluación Técnica →
                 </button>
               </div>
@@ -243,7 +278,7 @@ export default function ExamenPostulante() {
                 {preguntaActual.tipo === 'opcion' ? (
                   <div className="space-y-3">
                     {(preguntaActual.opciones || []).map((opcion, idx) => {
-                      const seleccionada = respuestas[indicePregunta] === opcion;
+                      const seleccionada = respuestas[indicePregunta] === idx;
                       return (
                         <label
                           key={idx}
@@ -256,7 +291,7 @@ export default function ExamenPostulante() {
                             type="radio"
                             name={`pregunta-${indicePregunta}`}
                             checked={seleccionada}
-                            onChange={() => setRespuestas((prev) => ({ ...prev, [indicePregunta]: opcion }))}
+                            onChange={() => setRespuestas((prev) => ({ ...prev, [indicePregunta]: idx }))}
                             className="h-4 w-4 text-blue-900 focus:ring-blue-900"
                           />
                           <span>{opcion}</span>
@@ -325,11 +360,16 @@ export default function ExamenPostulante() {
 
               <div className="my-6 rounded-xl border border-slate-200 bg-slate-50 p-4 max-w-xs mx-auto">
                 <span className="text-[11px] font-semibold uppercase text-slate-500">Puntaje Objetivo</span>
-                <p className="mt-1 text-3xl font-extrabold text-blue-950">{resultado.objective_score ?? 85} / 100</p>
+                <p className="mt-1 text-3xl font-extrabold text-blue-950">{resultado.objectiveScore} / 100</p>
+                {resultado.correctAnswers !== null && (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Respuestas correctas: {resultado.correctAnswers} de {resultado.totalObjectiveQuestions}
+                  </p>
+                )}
               </div>
 
               <button
-                onClick={logout}
+                onClick={cerrarSesion}
                 className="rounded-lg bg-blue-950 px-6 py-2.5 text-xs font-semibold text-white hover:bg-blue-900" >
                 Salir del portal
               </button>

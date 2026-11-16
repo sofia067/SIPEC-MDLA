@@ -6,7 +6,7 @@ function escapeRegex(value) {
 
 function replaceKnownIdentifier(text, value) {
   const identifier = String(value ?? '').trim();
-  if (identifier.length < 3) return { text, count: 0 };
+  if (identifier.length < 4) return { text, count: 0 };
   const flexibleWhitespace = escapeRegex(identifier).replace(/\s+/g, '\\s+');
   const expression = new RegExp(flexibleWhitespace, 'giu');
   let count = 0;

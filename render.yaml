@@ -29,6 +29,10 @@ services:
         sync: false
       - key: HR_SPECIALIST_PASSWORD
         sync: false
+      - key: PUBLIC_APPLICATION_PRIVACY_NOTICE_URL
+        sync: false
+      - key: PUBLIC_APPLICATION_PRIVACY_NOTICE_VERSION
+        sync: false
 
 databases:
   - name: sipec-mla-db

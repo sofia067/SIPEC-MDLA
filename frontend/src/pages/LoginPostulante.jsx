@@ -3,18 +3,18 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useCandidateAuth } from '../auth/CandidateAuthContext';
 
 export default function LoginPostulante() {
-  const [email, setEmail] = useState('');
+  const [applicationCode, setApplicationCode] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
-  const { user, login } = useCandidateAuth();
+  const { user, loading, login } = useCandidateAuth();
 
   useEffect(() => {
-    if (user) {
+    if (!loading && user) {
       navigate('/postulante/examen-tecnico', { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, loading, navigate]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -23,7 +23,7 @@ export default function LoginPostulante() {
 
     try {
       // Inicia sesión con las credenciales enviadas por RR.HH.
-      await login(email, password);
+      await login(applicationCode, password);
       navigate('/postulante/examen-tecnico', { replace: true });
     } catch (requestError) {
       setError(requestError.message || 'Credenciales inválidas. Por favor verifique sus datos.');
@@ -44,25 +44,25 @@ export default function LoginPostulante() {
         <div className="p-6 sm:p-8">
           <h2 className="text-xl font-bold text-slate-900">Ingresa con tus credenciales</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Utiliza el correo y la contraseña provisionales que se te enviaron para rendir tu examen.
+            Utiliza el código de postulación y la contraseña provisional que te envió RR. HH.
           </p>
 
           <form onSubmit={submit} className="mt-5 space-y-4">
             <div>
-              <label htmlFor="candidate-email" className="mb-1 block text-sm font-semibold text-slate-700">
-                Correo electrónico
+              <label htmlFor="candidate-code" className="mb-1 block text-sm font-semibold text-slate-700">
+                Código de postulación
               </label>
-              <input 
-                id="candidate-email" 
-                name="email" 
-                type="email" 
-                autoComplete="email" 
+              <input
+                id="candidate-code"
+                name="applicationCode"
+                type="text"
+                autoComplete="username"
                 required 
-                maxLength={254} 
-                value={email} 
-                onChange={(e) => { setEmail(e.target.value); setError(''); }} 
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-700 focus:ring-2 focus:ring-blue-100" 
-                placeholder="nombre@correo.com" 
+                maxLength={24}
+                value={applicationCode}
+                onChange={(e) => { setApplicationCode(e.target.value); setError(''); }}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-700 focus:ring-2 focus:ring-blue-100"
+                placeholder="Código de postulación"
               />
             </div>
 
@@ -92,10 +92,10 @@ export default function LoginPostulante() {
 
             <button 
               type="submit" 
-              disabled={submitting} 
+              disabled={submitting || loading}
               className="w-full rounded-lg bg-blue-950 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-900 disabled:cursor-wait disabled:bg-slate-400"
             >
-              {submitting ? 'Verificando acceso…' : 'Ingresar al examen'}
+              {loading ? 'Verificando sesión…' : submitting ? 'Verificando acceso…' : 'Ingresar al examen'}
             </button>
           </form>
 

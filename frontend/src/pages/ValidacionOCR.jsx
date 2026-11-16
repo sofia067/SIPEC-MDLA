@@ -387,7 +387,7 @@ export default function ValidacionOCR() {
                       {tipoVinculo === 'worker'
                         ? item.full_name ?? item.name
                         : tipoVinculo === 'candidate'
-                          ? `${item.application_code} · ${item.position_title} (${item.request_code})`
+                          ? `${item.application_code} · ${item.position_title} (${item.request_code})${item.is_demo ? ' · DEMO' : ''}`
                           : item.code}
                     </option>
                   ))}

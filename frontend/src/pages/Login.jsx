@@ -120,7 +120,7 @@ function Login() {
                 <input type="checkbox" className="mr-2 rounded border-gray-300 text-blue-800" />
                 Recordar sesión
               </label>
-              <a href="#" className="text-blue-700 hover:underline">¿Olvidaste tu contraseña?</a>
+              <Link to="/recuperar-contrasena" className="text-blue-700 hover:underline">¿Olvidaste tu contraseña?</Link>
             </div>
 
             <button 
@@ -133,9 +133,9 @@ function Login() {
             </button>
           </form>
           <p className="mt-5 text-center text-xs text-gray-500">
-            ¿Eres postulante?{' '}
+            ¿Buscas postular a una convocatoria?{' '}
             <Link to="/postular" className="font-semibold text-blue-800 hover:underline">
-              Entra aquí
+              Ir al portal de postulaciones
             </Link>
           </p>
         </div>

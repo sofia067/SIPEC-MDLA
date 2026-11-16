@@ -31,6 +31,7 @@ const fechaRevisionCv = (date) => date
 export default function CandidatosCompatibles() {
   const navigate = useNavigate();
   const [solicitudFiltro, setSolicitudFiltro] = useState('');
+  const [incluirDemos, setIncluirDemos] = useState(false);
   const [candidatoSeleccionado, setCandidatoSeleccionado] = useState(null);
   const [cvSeleccionado, setCvSeleccionado] = useState(null);
   const [revisionCv, setRevisionCv] = useState(null);
@@ -51,7 +52,8 @@ export default function CandidatosCompatibles() {
     },
   ])).values()];
   const solicitudActiva = solicitudes.find((solicitud) => solicitud.id === solicitudFiltro);
-  const candidatosFiltrados = candidatos.filter((candidato) => candidato.request_id === solicitudFiltro);
+  const candidatosFiltrados = candidatos.filter((candidato) => candidato.request_id === solicitudFiltro
+    && (incluirDemos || !candidato.is_demo));
 
   async function revisarCv(candidato) {
     setCvSeleccionado(candidato);
@@ -72,7 +74,11 @@ export default function CandidatosCompatibles() {
     apiRequest('/blind-selection/candidates')
       .then(({ candidates: currentCandidates }) => {
         setCandidatos(currentCandidates);
-        setSolicitudFiltro(currentCandidates[0]?.request_id ?? '');
+        setSolicitudFiltro(
+          currentCandidates.find((candidate) => !candidate.is_demo)?.request_id
+            ?? currentCandidates[0]?.request_id
+            ?? '',
+        );
       })
       .catch((requestError) => setError(requestError.message))
       .finally(() => setCargando(false));
@@ -125,6 +131,15 @@ export default function CandidatosCompatibles() {
               </select>
             </div>
           </div>
+          <label className="flex w-fit items-center gap-2 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={incluirDemos}
+              onChange={(event) => setIncluirDemos(event.target.checked)}
+              className="h-4 w-4 accent-blue-900"
+            />
+            Incluir registros de demostración
+          </label>
 
           {/* Banner de Garantía Anti-Favoritismo */}
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-center justify-between text-xs text-amber-900">
@@ -180,6 +195,9 @@ export default function CandidatosCompatibles() {
                     <h4 className="font-bold text-gray-900 text-sm font-mono">{cand.application_code}</h4>
                     <p className="text-xs text-gray-500">{cand.position_title}</p>
                     <span className="text-[10px] bg-gray-100 text-gray-600 font-semibold px-2 py-0.5 rounded">Identidad Protegida</span>
+                    <span className={`ml-1 inline-block rounded px-2 py-0.5 text-[10px] font-semibold ${cand.is_demo ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                      {cand.is_demo ? 'Demostración' : 'Postulación oficial'}
+                    </span>
                     {cand.has_resume && (
                       <p className={`mt-1 text-[10px] font-semibold ${cand.resume_reviewed_at ? 'text-emerald-700' : 'text-amber-700'}`}>
                         {cand.resume_reviewed_at

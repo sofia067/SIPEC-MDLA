@@ -4,6 +4,7 @@ import { EVALUATION_BANKS } from '../data/evaluation-banks.js';
 import { getRequestIpAddress } from '../middleware/request-context.js';
 import { getAreaScope } from '../middleware/role-scope.js';
 import { redactCandidateDocumentText } from '../services/resume-review.js';
+import { scoreObjectiveAnswers } from '../services/candidate-exam.js';
 
 const workerSelect = `
   SELECT w.id, w.employee_number, w.document_number, w.full_name, w.email, w.phone,
@@ -395,7 +396,8 @@ export const modulesRepository = {
 
   async listBlindCandidateDocumentOptions(areaName = null) {
     const result = await pool.query(
-      `SELECT c.id, c.application_code, r.code AS request_code, p.title AS position_title
+      `SELECT c.id, c.application_code, r.code AS request_code, p.title AS position_title,
+              c.is_demo
        FROM blind_candidates c
        JOIN coverage_requests r ON r.id = c.request_id
        JOIN departments d ON d.id = r.department_id
@@ -816,7 +818,8 @@ export const modulesRepository = {
        FROM blind_candidates c
        JOIN coverage_requests r ON r.id = c.request_id
        JOIN position_profiles p ON p.id = r.position_id
-       WHERE upper(c.application_code) = $1 AND c.document_number = $2`,
+       WHERE upper(c.application_code) = $1 AND c.document_number = $2
+         AND c.is_demo = false`,
       [applicationCode, documentNumber],
     );
     if (!result.rowCount) return null;
@@ -1024,7 +1027,7 @@ export const modulesRepository = {
     });
   },
 
-  async createPublicDemoApplication(input, resume, documents, matchResult) {
+  async createPublicApplication(input, resume, documents, matchResult) {
     return withTransaction(async (client) => {
       const request = await client.query(
         `SELECT r.id, r.code
@@ -1045,15 +1048,16 @@ export const modulesRepository = {
            (application_code, request_id, full_name, document_number, email, phone,
             is_demo, resume_file_name, resume_file_path, resume_file_mime,
             resume_file_size, resume_file_sha256, match_score, match_status,
-            match_breakdown, match_calculated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, 'application/pdf', $9, $10,
-                 $11, $12, $13, $14)
+           match_breakdown, match_calculated_at, privacy_notice_version, privacy_consent_at)
+        VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8, 'application/pdf', $9, $10,
+                $11, $12, $13, $14, $15, now())
          RETURNING id, application_code`,
         [applicationCode, input.requestId, input.fullName, input.documentNumber,
           input.email || null, input.phone || null, resume.fileName, resume.filePath,
           resume.fileSize, resume.fileSha256, matchResult.score, matchResult.status,
           JSON.stringify(matchResult.breakdown),
-          matchResult.status === 'calculated' ? new Date() : null],
+         matchResult.status === 'calculated' ? new Date() : null,
+         input.privacyNoticeVersion],
       );
       const savedDocuments = [];
       for (const document of documents) {
@@ -1074,19 +1078,20 @@ export const modulesRepository = {
          VALUES ($1, 'application_received', 'Recibimos tu postulación.', now())`,
         [candidate.rows[0].id],
       );
-      await recordAudit(client, null, 'blind_candidate.demo_submitted', 'blind_candidate',
+      await recordAudit(client, null, 'blind_candidate.public_submitted', 'blind_candidate',
         candidate.rows[0].id, {
           applicationCode,
           requestCode: request.rows[0].code,
           matchScore: matchResult.score,
           matchStatus: matchResult.status,
           attachedDocumentCount: savedDocuments.length,
+          privacyNoticeVersion: input.privacyNoticeVersion,
         });
       return { ...candidate.rows[0], documents: savedDocuments };
     });
   },
 
-  async submitBlindSelectionExam(candidateId, answers, actorId) {
+  async submitBlindSelectionExam(candidateId, answers, actorId, { allowUnanswered = false } = {}) {
     return withTransaction(async (client) => {
       const candidateResult = await client.query(
         `SELECT c.id, c.application_code, c.process_stage, p.title AS position_title
@@ -1107,30 +1112,29 @@ export const modulesRepository = {
       if (answers.length !== bank.preguntas.length) {
         throw new AppError(400, 'INVALID_ANSWERS', 'Debes responder todas las preguntas del examen.');
       }
-      const objectiveQuestions = bank.preguntas.filter((question) => question.tipo === 'opcion');
       for (const [index, question] of bank.preguntas.entries()) {
         const answer = answers[index];
         if (question.tipo === 'opcion') {
+          if (allowUnanswered && (answer === null || answer === undefined || answer === '')) continue;
           if (!Number.isInteger(answer) || answer < 0 || answer >= question.opciones.length) {
             throw new AppError(400, 'INVALID_ANSWERS', 'Una respuesta de opción múltiple no es válida.');
           }
+        } else if (allowUnanswered && (answer === null || answer === undefined || answer === '')) {
+          continue;
         } else if (typeof answer !== 'string' || !answer.trim()) {
           throw new AppError(400, 'INVALID_ANSWERS', 'Completa todas las preguntas de desarrollo.');
         }
       }
 
-      const correctAnswers = bank.preguntas.reduce(
-        (count, question, index) => count + (
-          question.tipo === 'opcion' && answers[index] === question.respuesta ? 1 : 0
-        ),
-        0,
-      );
-      const objectiveScore = Math.round((correctAnswers / objectiveQuestions.length) * 100);
+      const { correctAnswers, totalQuestions, objectiveScore } = scoreObjectiveAnswers(bank, answers);
+      if (totalQuestions === 0) {
+        throw new AppError(500, 'INVALID_EVALUATION_BANK', 'El banco no tiene preguntas objetivas para calcular el puntaje.');
+      }
       const objectiveAnswers = bank.preguntas.map((question, index) => (
-        question.tipo === 'opcion' ? answers[index] : null
+        question.tipo === 'opcion' ? answers[index] ?? null : null
       ));
       const writtenAnswers = bank.preguntas
-        .map((question, index) => question.tipo === 'escrita' ? answers[index] : null)
+        .map((question, index) => question.tipo === 'escrita' ? answers[index] ?? '' : null)
         .filter((answer) => answer !== null);
 
       const existing = await client.query(
@@ -1163,7 +1167,13 @@ export const modulesRepository = {
       }
       await recordAudit(client, actorId, 'blind_candidate.exam_submitted', 'blind_candidate',
         candidateId, { applicationCode: candidate.application_code, objectiveScore });
-      return { ...exam.rows[0], application_code: candidate.application_code, position_title: candidate.position_title };
+      return {
+        ...exam.rows[0],
+        correct_answers: correctAnswers,
+        total_objective_questions: totalQuestions,
+        application_code: candidate.application_code,
+        position_title: candidate.position_title,
+      };
     });
   },
 
@@ -1239,6 +1249,24 @@ export const modulesRepository = {
       preguntas: bank.preguntas.map(({ tipo, texto, opciones }) => ({ tipo, texto, ...(opciones ? { opciones } : {}) })),
       });
     });
+  },
+
+  getCandidateExamBank(positionTitle) {
+    const bank = EVALUATION_BANKS.find(
+      (item) => item.puesto.toLocaleLowerCase('es') === positionTitle.toLocaleLowerCase('es'),
+    );
+    if (!bank) {
+      throw new AppError(409, 'NO_EVALUATION_BANK', 'No hay un banco de evaluación configurado para el puesto de esta convocatoria.');
+    }
+    validateEvaluationBank(bank);
+    return {
+      puesto: bank.puesto,
+      preguntas: bank.preguntas.map(({ tipo, texto, opciones }) => ({
+        tipo,
+        texto,
+        ...(opciones ? { opciones } : {}),
+      })),
+    };
   },
 
   async getApplicationSettings() {

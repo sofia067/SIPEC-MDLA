@@ -70,6 +70,10 @@ export default function Configuracion() {
   const [formularioUsuario, setFormularioUsuario] = useState(usuarioNuevo);
   const [errorUsuarios, setErrorUsuarios] = useState('');
   const [mensajeUsuarios, setMensajeUsuarios] = useState('');
+  const [solicitudesRestablecimiento, setSolicitudesRestablecimiento] = useState([]);
+  const [cargandoRestablecimientos, setCargandoRestablecimientos] = useState(true);
+  const [errorRestablecimientos, setErrorRestablecimientos] = useState('');
+  const [solicitudAtendiendo, setSolicitudAtendiendo] = useState('');
   const hayCambios = JSON.stringify(configuracion) !== JSON.stringify(configuracionGuardada);
 
   useEffect(() => {
@@ -88,6 +92,13 @@ export default function Configuracion() {
       .then(({ users }) => setUsuarios(users))
       .catch((requestError) => setErrorUsuarios(requestError.message))
       .finally(() => setCargandoUsuarios(false));
+  }, []);
+
+  useEffect(() => {
+    apiRequest('/settings/password-reset-requests')
+      .then(({ requests }) => setSolicitudesRestablecimiento(requests))
+      .catch((requestError) => setErrorRestablecimientos(requestError.message))
+      .finally(() => setCargandoRestablecimientos(false));
   }, []);
 
   const actualizarCampo = (campo, valor) => {
@@ -183,6 +194,19 @@ export default function Configuracion() {
     setFormularioUsuario(usuarioNuevo);
     setErrorUsuarios('');
     setMensajeUsuarios('');
+  };
+
+  const marcarSolicitudAtendida = async (id) => {
+    setSolicitudAtendiendo(id);
+    setErrorRestablecimientos('');
+    try {
+      await apiRequest(`/settings/password-reset-requests/${id}/resolve`, { method: 'PATCH' });
+      setSolicitudesRestablecimiento((actuales) => actuales.filter((solicitud) => solicitud.id !== id));
+    } catch (requestError) {
+      setErrorRestablecimientos(requestError.message);
+    } finally {
+      setSolicitudAtendiendo('');
+    }
   };
 
   const guardarUsuario = async (evento) => {
@@ -328,6 +352,40 @@ export default function Configuracion() {
               {mensaje && <p role="status" className="text-sm text-green-800">{mensaje}</p>}
             </div>
           </form>
+
+          <section aria-labelledby="solicitudes-restablecimiento-titulo" className="max-w-4xl space-y-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+            <div>
+              <h3 id="solicitudes-restablecimiento-titulo" className="font-semibold text-gray-900">Solicitudes de recuperación de contraseña</h3>
+              <p className="mt-1 text-sm text-gray-600">Verifica la identidad del usuario y asígnale una contraseña nueva desde la sección Usuarios y accesos. La solicitud no restablece la contraseña automáticamente.</p>
+            </div>
+            {errorRestablecimientos && <p role="alert" className="text-sm text-red-700">{errorRestablecimientos}</p>}
+            {cargandoRestablecimientos ? (
+              <p role="status" className="text-sm text-gray-500">Cargando solicitudes…</p>
+            ) : solicitudesRestablecimiento.length === 0 ? (
+              <p className="text-sm text-gray-500">No hay solicitudes pendientes.</p>
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {solicitudesRestablecimiento.map((solicitud) => (
+                  <li key={solicitud.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                    <div>
+                      <p className="font-medium text-gray-900">{solicitud.display_name} <span className="font-normal text-gray-600">({solicitud.username})</span></p>
+                      <p className="text-xs text-gray-500">
+                        {new Intl.DateTimeFormat('es-PE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(solicitud.created_at))}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => marcarSolicitudAtendida(solicitud.id)}
+                      disabled={Boolean(solicitudAtendiendo)}
+                      className="rounded-lg border border-blue-900 px-3 py-2 text-sm font-semibold text-blue-900 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {solicitudAtendiendo === solicitud.id ? 'Guardando…' : 'Marcar atendida'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
           <section aria-labelledby="usuarios-titulo" className="max-w-4xl space-y-5 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
             <div>
