@@ -10,9 +10,14 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     apiRequest('/auth/me')
-      .then(({ user: currentUser }) => setUser(currentUser))
+      .then((data) => {
+        setUser(data?.user ?? null);
+      })
       .catch((error) => {
-        if (error.status === 401) return;
+        if (error.status === 401) {
+          setUser(null);
+          return;
+        }
         setConnectionError(error.message);
       })
       .finally(() => setLoading(false));
@@ -27,9 +32,10 @@ export function AuthProvider({ children }) {
         method: 'POST',
         body: JSON.stringify(credentials),
       });
-      setUser(result.user);
+      const loggedUser = result?.user ?? null;
+      setUser(loggedUser);
       setConnectionError('');
-      return result.user;
+      return loggedUser;
     },
     async logout() {
       await apiRequest('/auth/logout', { method: 'POST' });

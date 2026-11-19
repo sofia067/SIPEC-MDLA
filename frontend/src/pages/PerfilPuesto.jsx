@@ -21,17 +21,35 @@ const emptyProfile = {
   functions: '',
 };
 
-const toLines = (value) => value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+const toLines = (value) =>
+  value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 
 function ProfileField({ label, value, onChange, rows = 1, required = false, type = 'text', step }) {
-  const className = 'mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900';
+  const className =
+    'mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900';
   return (
     <label className="block text-sm font-medium text-gray-700">
       {label}
       {rows > 1 ? (
-        <textarea className={className} rows={rows} value={value} onChange={onChange} required={required} />
+        <textarea
+          className={className}
+          rows={rows}
+          value={value}
+          onChange={onChange}
+          required={required}
+        />
       ) : (
-        <input className={className} type={type} step={step} value={value} onChange={onChange} required={required} />
+        <input
+          className={className}
+          type={type}
+          step={step}
+          value={value}
+          onChange={onChange}
+          required={required}
+        />
       )}
     </label>
   );
@@ -41,8 +59,12 @@ export default function PerfilPuesto() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const puedeGestionarPerfiles = ['admin', 'hr_specialist'].includes(user?.role);
+
   const [profiles, setProfiles] = useState([]);
-  const [lookupData, setLookupData] = useState({ departments: [], catalogData: { positionLevels: [], educationLevels: [] } });
+  const [lookupData, setLookupData] = useState({
+    departments: [],
+    catalogData: { positionLevels: [], educationLevels: [] },
+  });
   const [areaFilter, setAreaFilter] = useState('Todas');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(emptyProfile);
@@ -50,6 +72,7 @@ export default function PerfilPuesto() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deactivating, setDeactivating] = useState('');
+  const [deleting, setDeleting] = useState('');
   const [error, setError] = useState('');
 
   async function loadProfiles() {
@@ -71,7 +94,7 @@ export default function PerfilPuesto() {
         .then(setLookupData)
         .catch((requestError) => setError(requestError.message));
     }
-  }, []);
+  }, [puedeGestionarPerfiles]);
 
   async function saveProfile(event) {
     event.preventDefault();
@@ -107,11 +130,17 @@ export default function PerfilPuesto() {
   }
 
   async function deactivateProfile(profile) {
-    if (!window.confirm(`¿Desactivar el perfil «${profile.title}»? Se conservará en la base de datos.`)) return;
+    if (
+      !window.confirm(
+        `¿Desactivar el perfil «${profile.title}»? Se conservará como inactivo en la base de datos.`
+      )
+    ) {
+      return;
+    }
     setDeactivating(profile.id);
     setError('');
     try {
-      await apiRequest(`/profiles/${profile.id}`, { method: 'DELETE' });
+      await apiRequest(`/profiles/${profile.id}/deactivate`, { method: 'PATCH' });
       await loadProfiles();
     } catch (requestError) {
       setError(requestError.message);
@@ -120,7 +149,27 @@ export default function PerfilPuesto() {
     }
   }
 
-  const areas = [...new Set(profiles.map((profile) => profile.department))];
+  async function deleteProfile(profile) {
+    if (
+      !window.confirm(
+        `¿Eliminar permanentemente el perfil «${profile.title}»? Esta acción no se puede deshacer.`
+      )
+    ) {
+      return;
+    }
+    setDeleting(profile.id);
+    setError('');
+    try {
+      await apiRequest(`/profiles/${profile.id}`, { method: 'DELETE' });
+      await loadProfiles();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setDeleting('');
+    }
+  }
+
+  const areas = [...new Set(profiles.map((profile) => profile.department).filter(Boolean))];
   const filteredProfiles = profiles.filter((profile) => {
     const areaMatches = areaFilter === 'Todas' || profile.department === areaFilter;
     const query = search.toLocaleLowerCase();
@@ -142,26 +191,44 @@ export default function PerfilPuesto() {
         <header className="bg-white border-b px-8 py-3 flex justify-between items-center">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold text-blue-950">SIPEC-MLA</h1>
-            <span className="text-xs bg-blue-100 text-blue-800 font-medium px-2.5 py-0.5 rounded-full">Perfiles de Puesto</span>
+            <span className="text-xs bg-blue-100 text-blue-800 font-medium px-2.5 py-0.5 rounded-full">
+              Perfiles de Puesto
+            </span>
           </div>
           <UserDropdown />
         </header>
 
         <main className="p-8 space-y-6">
-          {error && <div role="alert" className="rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+          {error && (
+            <div
+              role="alert"
+              className="rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-700"
+            >
+              {error}
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-bold">Perfiles de Puesto</h2>
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-full shadow-sm">
+                <h2 className="text-2xl font-bold">Perfiles de Puesto</h2>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-full shadow-sm">
                   <span>⚡</span>
                   <span>Modo Demostración</span>
                 </span>
               </div>
-              <p className="text-sm text-gray-500">Gestión de requisitos, competencias y funciones por unidad orgánica</p>
+              <p className="text-sm text-gray-500">
+                Gestión de requisitos, competencias y funciones por unidad orgánica
+              </p>
             </div>
             {puedeGestionarPerfiles && (
-              <button onClick={() => { setError(''); setShowForm(true); }} className="bg-blue-950 hover:bg-blue-900 text-white font-semibold text-sm px-4 py-2.5 rounded-lg">
+              <button
+                onClick={() => {
+                  setError('');
+                  setShowForm(true);
+                }}
+                className="bg-blue-950 hover:bg-blue-900 text-white font-semibold text-sm px-4 py-2.5 rounded-lg"
+              >
                 + Nuevo perfil
               </button>
             )}
@@ -175,9 +242,17 @@ export default function PerfilPuesto() {
               onChange={(event) => setSearch(event.target.value)}
               className="w-full md:w-2/3 border border-gray-300 rounded-lg px-3 py-2 text-sm"
             />
-            <select value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)} className="w-full md:w-1/3 border border-gray-300 rounded-lg p-2 text-sm">
+            <select
+              value={areaFilter}
+              onChange={(event) => setAreaFilter(event.target.value)}
+              className="w-full md:w-1/3 border border-gray-300 rounded-lg p-2 text-sm"
+            >
               <option value="Todas">Todas las unidades orgánicas</option>
-              {areas.map((area) => <option key={area} value={area}>{area}</option>)}
+              {areas.map((area) => (
+                <option key={area} value={area}>
+                  {area}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -190,7 +265,9 @@ export default function PerfilPuesto() {
                   <th className="py-3 px-4">Nivel</th>
                   <th className="py-3 px-4">Remuneración</th>
                   <th className="py-3 px-4">Estado</th>
-                  <th className="py-3 px-4 text-center">Detalle{puedeGestionarPerfiles ? ' / Acciones' : ''}</th>
+                  <th className="py-3 px-4 text-center">
+                    Detalle{puedeGestionarPerfiles ? ' / Acciones' : ''}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -198,34 +275,74 @@ export default function PerfilPuesto() {
                   <tr key={profile.id} className="hover:bg-gray-50">
                     <td className="py-3 px-4">
                       <div className="font-semibold">{profile.title}</div>
-                      <div className="text-xs text-gray-500">{profile.profile_code || 'Sin código'}</div>
+                      <div className="text-xs text-gray-500">
+                        {profile.profile_code || 'Sin código'}
+                      </div>
                     </td>
                     <td className="py-3 px-4 text-gray-600">{profile.department}</td>
                     <td className="py-3 px-4">{profile.level}</td>
-                    <td className="py-3 px-4">{profile.remuneration == null ? '—' : `S/ ${Number(profile.remuneration).toLocaleString('es-PE', { minimumFractionDigits: 2 })}`}</td>
                     <td className="py-3 px-4">
-                      <span className={`font-medium px-2 py-1 rounded-full text-xs ${profile.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {profile.remuneration == null
+                        ? '—'
+                        : `S/ ${Number(profile.remuneration).toLocaleString('es-PE', {
+                            minimumFractionDigits: 2,
+                          })}`}
+                    </td>
+                    <td className="py-3 px-4">
+                      <span
+                        className={`font-medium px-2 py-1 rounded-full text-xs ${
+                          profile.status === 'active'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
                         {profile.status === 'active' ? 'Activo' : 'Inactivo'}
                       </span>
                     </td>
                     <td className="py-3 px-4">
-                      <div className="flex justify-center gap-2">
-                        <button onClick={() => navigate(`/perfil-puesto/detalle/${profile.id}`)} className="text-blue-900 hover:underline font-semibold">Ver ficha</button>
+                      <div className="flex justify-center gap-3">
+                        <button
+                          onClick={() => navigate(`/perfil-puesto/detalle/${profile.id}`)}
+                          className="text-blue-900 hover:underline font-semibold"
+                        >
+                          Ver ficha
+                        </button>
                         {puedeGestionarPerfiles && profile.status === 'active' && (
                           <button
                             onClick={() => deactivateProfile(profile)}
-                            disabled={deactivating === profile.id}
-                            className="text-red-700 hover:underline disabled:text-gray-400"
+                            disabled={deactivating === profile.id || deleting === profile.id}
+                            className="text-amber-700 hover:underline disabled:text-gray-400"
                           >
                             {deactivating === profile.id ? 'Desactivando...' : 'Desactivar'}
+                          </button>
+                        )}
+                        {puedeGestionarPerfiles && (
+                          <button
+                            onClick={() => deleteProfile(profile)}
+                            disabled={deleting === profile.id || deactivating === profile.id}
+                            className="text-red-700 hover:underline font-semibold disabled:text-gray-400"
+                          >
+                            {deleting === profile.id ? 'Eliminando...' : 'Eliminar'}
                           </button>
                         )}
                       </div>
                     </td>
                   </tr>
                 ))}
-                {!loading && filteredProfiles.length === 0 && <tr><td colSpan="6" className="py-6 text-center text-gray-500">{error ? 'No se pudieron cargar los perfiles.' : 'No hay perfiles registrados.'}</td></tr>}
-                {loading && <tr><td colSpan="6" className="py-6 text-center text-gray-500">Cargando perfiles...</td></tr>}
+                {!loading && filteredProfiles.length === 0 && (
+                  <tr>
+                    <td colSpan="6" className="py-6 text-center text-gray-500">
+                      {error ? 'No se pudieron cargar los perfiles.' : 'No hay perfiles registrados.'}
+                    </td>
+                  </tr>
+                )}
+                {loading && (
+                  <tr>
+                    <td colSpan="6" className="py-6 text-center text-gray-500">
+                      Cargando perfiles...
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -234,48 +351,149 @@ export default function PerfilPuesto() {
 
       {puedeGestionarPerfiles && showForm && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="profile-form-title" className="mx-auto my-8 w-full max-w-4xl rounded-xl bg-white p-6 shadow-xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-form-title"
+            className="mx-auto my-8 w-full max-w-4xl rounded-xl bg-white p-6 shadow-xl"
+          >
             <div className="mb-5 flex items-center justify-between border-b pb-3">
-              <h3 id="profile-form-title" className="text-lg font-bold">Registrar ficha de puesto</h3>
-              <button onClick={() => setShowForm(false)} aria-label="Cerrar" className="text-xl text-gray-500">×</button>
+              <h3 id="profile-form-title" className="text-lg font-bold">
+                Registrar ficha de puesto
+              </h3>
+              <button
+                onClick={() => setShowForm(false)}
+                aria-label="Cerrar"
+                className="text-xl text-gray-500"
+              >
+                ×
+              </button>
             </div>
             <form onSubmit={saveProfile} className="space-y-5">
               <section className="grid gap-4 md:grid-cols-2">
-                <ProfileField label="Nombre del puesto" required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
-                <ProfileField label="Código del perfil" value={form.profileCode} onChange={(event) => setForm({ ...form, profileCode: event.target.value })} />
+                <ProfileField
+                  label="Nombre del puesto"
+                  required
+                  value={form.title}
+                  onChange={(event) => setForm({ ...form, title: event.target.value })}
+                />
+                <ProfileField
+                  label="Código del perfil"
+                  value={form.profileCode}
+                  onChange={(event) => setForm({ ...form, profileCode: event.target.value })}
+                />
                 <label className="block text-sm font-medium text-gray-700">
                   Unidad orgánica
-                  <select required value={form.department} onChange={(event) => setForm({ ...form, department: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900">
+                  <select
+                    required
+                    value={form.department}
+                    onChange={(event) => setForm({ ...form, department: event.target.value })}
+                    className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
+                  >
                     <option value="">Selecciona un área</option>
-                    {lookupData.departments.map((department) => <option key={department.name} value={department.name}>{department.name}</option>)}
+                    {lookupData.departments.map((department) => (
+                      <option key={department.name} value={department.name}>
+                        {department.name}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label className="block text-sm font-medium text-gray-700">
                   Nivel / Grupo
-                  <select required value={form.level} onChange={(event) => setForm({ ...form, level: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900">
+                  <select
+                    required
+                    value={form.level}
+                    onChange={(event) => setForm({ ...form, level: event.target.value })}
+                    className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
+                  >
                     <option value="">Selecciona un nivel o grupo</option>
-                    {lookupData.catalogData.positionLevels.map((level) => <option key={level} value={level}>{level}</option>)}
+                    {lookupData.catalogData.positionLevels.map((level) => (
+                      <option key={level} value={level}>
+                        {level}
+                      </option>
+                    ))}
                   </select>
                 </label>
-                <ProfileField label="Remuneración referencial (S/)" type="number" step="0.01" value={form.remuneration} onChange={(event) => setForm({ ...form, remuneration: event.target.value })} />
+                <ProfileField
+                  label="Remuneración referencial (S/)"
+                  type="number"
+                  step="0.01"
+                  value={form.remuneration}
+                  onChange={(event) => setForm({ ...form, remuneration: event.target.value })}
+                />
                 <label className="block text-sm font-medium text-gray-700">
                   Formación académica
-                  <select value={form.education} onChange={(event) => setForm({ ...form, education: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900">
+                  <select
+                    value={form.education}
+                    onChange={(event) => setForm({ ...form, education: event.target.value })}
+                    className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
+                  >
                     <option value="">Selecciona una formación</option>
-                    {lookupData.catalogData.educationLevels.map((education) => <option key={education} value={education}>{education}</option>)}
+                    {lookupData.catalogData.educationLevels.map((education) => (
+                      <option key={education} value={education}>
+                        {education}
+                      </option>
+                    ))}
                   </select>
                 </label>
-                <ProfileField label="Experiencia general" rows={2} value={form.generalExperience} onChange={(event) => setForm({ ...form, generalExperience: event.target.value })} />
-                <ProfileField label="Experiencia específica" rows={2} value={form.specificExperience} onChange={(event) => setForm({ ...form, specificExperience: event.target.value })} />
+                <ProfileField
+                  label="Experiencia general"
+                  rows={2}
+                  value={form.generalExperience}
+                  onChange={(event) => setForm({ ...form, generalExperience: event.target.value })}
+                />
+                <ProfileField
+                  label="Experiencia específica"
+                  rows={2}
+                  value={form.specificExperience}
+                  onChange={(event) => setForm({ ...form, specificExperience: event.target.value })}
+                />
               </section>
-              <ProfileField label="Conocimientos técnicos / certificaciones (uno por línea)" rows={4} value={form.technicalKnowledge} onChange={(event) => setForm({ ...form, technicalKnowledge: event.target.value })} />
-              <ProfileField label="Competencias (una por línea)" rows={3} value={form.competencies} onChange={(event) => setForm({ ...form, competencies: event.target.value })} />
-              <ProfileField label="Funciones principales (una por línea)" rows={5} value={form.functions} onChange={(event) => setForm({ ...form, functions: event.target.value })} />
-              <ProfileField label="Otros requisitos principales" rows={3} value={form.principalRequirements} onChange={(event) => setForm({ ...form, principalRequirements: event.target.value })} />
-              <ProfileField label="Descripción / misión del puesto" rows={3} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} />
+              <ProfileField
+                label="Conocimientos técnicos / certificaciones (uno por línea)"
+                rows={4}
+                value={form.technicalKnowledge}
+                onChange={(event) => setForm({ ...form, technicalKnowledge: event.target.value })}
+              />
+              <ProfileField
+                label="Competencias (una por línea)"
+                rows={3}
+                value={form.competencies}
+                onChange={(event) => setForm({ ...form, competencies: event.target.value })}
+              />
+              <ProfileField
+                label="Funciones principales (una por línea)"
+                rows={5}
+                value={form.functions}
+                onChange={(event) => setForm({ ...form, functions: event.target.value })}
+              />
+              <ProfileField
+                label="Otros requisitos principales"
+                rows={3}
+                value={form.principalRequirements}
+                onChange={(event) =>
+                  setForm({ ...form, principalRequirements: event.target.value })
+                }
+              />
+              <ProfileField
+                label="Descripción / misión del puesto"
+                rows={3}
+                value={form.description}
+                onChange={(event) => setForm({ ...form, description: event.target.value })}
+              />
               <div className="flex justify-end gap-3 border-t pt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="rounded-lg border px-4 py-2 text-sm">Cancelar</button>
-                <button type="submit" disabled={saving} className="rounded-lg bg-blue-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-400">
+                <button
+                  type="button"
+                  onClick={() => setShowForm(false)}
+                  className="rounded-lg border px-4 py-2 text-sm"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-lg bg-blue-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-400"
+                >
                   {saving ? 'Guardando...' : 'Guardar ficha'}
                 </button>
               </div>
