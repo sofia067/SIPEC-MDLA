@@ -8,7 +8,7 @@ import { useAuth } from '../auth/AuthContext';
 
 function Dashboard() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+ const { user, loading: authLoading } = useAuth();
   const [dashboard, setDashboard] = useState(null);
   const [error, setError] = useState('');
   const [mostrarAlertas, setMostrarAlertas] = useState(false);
@@ -32,6 +32,14 @@ function Dashboard() {
     return () => { cancelled = true; };
   }, [intentoCarga]);
 
+  if (authLoading || (cargando && !dashboard)) {
+    return (
+      <div className="flex h-dvh items-center justify-center bg-gray-100 text-gray-600">
+        <p className="text-sm font-semibold">Cargando panel de control...</p>
+      </div>
+    );
+  }
+  
   const summary = dashboard?.summary;
   const recentRequests = dashboard?.requests ?? [];
   const puedeSolicitudes = ['admin', 'hr_specialist', 'area_manager'].includes(user?.role);
@@ -71,7 +79,10 @@ function Dashboard() {
             <h2 className="text-2xl font-bold text-gray-800">¡Bienvenido, {user?.displayName || user?.username}!</h2>
             <p className="text-xs text-gray-500 mt-1">Resumen de la gestión de personal</p>
           </div>
-
+         <div className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-full shadow-sm">
+      <span>⚡</span>
+      <span>Entorno de Demostración (Datos de Prueba)</span> 
+      </div>
           {error && (
             <div role="alert" className="rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-700">
               No se pudo cargar el resumen: {error}
@@ -117,33 +128,45 @@ function Dashboard() {
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-6">
             
             {/* Tabla de Solicitudes Recientes */}
-            <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 lg:col-span-2 sm:p-5">
+            <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 lg:col-span-2 sm:p-5 overflow-x-auto">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-sm text-gray-800">Solicitudes recientes</h3>
                 {puedeSolicitudes && <Link to="/solicitudes-cobertura" className="text-xs text-blue-900 font-semibold hover:underline">Ver todas {'>'}</Link>}
               </div>
-
+          
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="text-gray-400 border-b pb-2">
-                    <th className="pb-2 font-medium">Código</th>
-                    <th className="pb-2 font-medium">Área</th>
-                    <th className="pb-2 font-medium">Puesto</th>
-                    <th className="pb-2 font-medium">Fecha</th>
-                    <th className="pb-2 font-medium">Estado</th>
-                    <th className="pb-2 font-medium text-right">Acción</th>
+                  <tr className="text-gray-400 border-b">
+                    <th className="py-2.5 px-3 font-medium whitespace-nowrap">Código</th>
+                    <th className="py-2.5 px-3 font-medium">Área</th>
+                    <th className="py-2.5 px-3 font-medium">Puesto</th>
+                    <th className="py-2.5 px-3 font-medium whitespace-nowrap">Fecha</th>
+                    <th className="py-2.5 px-3 font-medium whitespace-nowrap">Estado</th>
+                    <th className="py-2.5 px-3 font-medium text-right whitespace-nowrap">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {recentRequests.map((request) => (
-                    <tr key={request.id}>
-                      <td className="py-2.5 font-bold text-gray-700">{request.code}</td>
-                      <td className="py-2.5">{request.department}</td>
-                      <td className="py-2.5">{request.position_title}</td>
-                      <td className="py-2.5">{formatDate(request.created_at)}</td>
-                      <td className="py-2.5">{formatStatus(request.status)}</td>
-                      <td className="py-2.5 text-right">
-                        {puedeSolicitudes && <Link to="/solicitudes-cobertura" className="text-blue-700 font-semibold">Ver</Link>}
+                    <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="py-3 px-3 font-bold text-blue-950 whitespace-nowrap">{request.code}</td>
+                      <td className="py-3 px-3 text-gray-700">{request.department}</td>
+                      <td className="py-3 px-3 font-medium text-gray-900">{request.position_title}</td>
+                      <td className="py-3 px-3 text-gray-500 whitespace-nowrap">{formatDate(request.created_at)}</td>
+                     <td className="py-3 px-3 whitespace-nowrap">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                          request.status === 'approved' || request.status === 'completed' ? 'bg-emerald-100 text-emerald-800' :
+                          request.status === 'in_review' ? 'bg-blue-100 text-blue-800' :
+                          request.status === 'rejected' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {formatStatus(request.status)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-right whitespace-nowrap">
+                        {puedeSolicitudes && (
+                          <Link to="/solicitudes-cobertura" className="text-blue-800 font-bold hover:underline">
+                            Ver
+                          </Link>
+                        )}
                       </td>
                     </tr>
                   ))}

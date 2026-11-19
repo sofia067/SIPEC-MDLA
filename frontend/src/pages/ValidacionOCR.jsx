@@ -41,10 +41,30 @@ export default function ValidacionOCR() {
       apiRequest('/blind-selection/candidate-document-options'),
       apiRequest('/documents'),
     ]);
+
+    // lee las postulaciones demo desde localstorage
+    let localCandidates = [];
+    try {
+      const saved = JSON.parse(localStorage.getItem('sipec_candidate_demo_applications') || '[]');
+      if (Array.isArray(saved)) {
+        localCandidates = saved.map((app, index) => ({
+          id: `local-demo-${app.applicationCode || index}`,
+          application_code: app.applicationCode,
+          position_title: app.positionTitle || 'Puesto de demostración',
+          request_code: app.requestCode || 'DEMO-REQ',
+          is_demo: true,
+        }));
+      }
+    } catch {
+      localCandidates = [];
+    }
+    // Unir los candidatos locales con los del servidor
+    const combinedCandidates = [...localCandidates, ...(candidateResult.candidates || [])];
+
     setReferencias({
       requests: lookups.requests,
       workers: lookups.workers,
-      candidates: candidateResult.candidates,
+      candidates: combinedCandidates,
     });
     setDocumentos(documentResult.documents);
   };
@@ -246,7 +266,13 @@ export default function ValidacionOCR() {
 
         <main className="p-4 sm:p-8 space-y-6">
           <div className="border-b pb-3">
+            <div className="flex items-center gap-3">
             <h2 className="text-2xl font-bold text-gray-900">Validación Documental Automatizada</h2>
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-full shadow-sm">
+                <span>⚡</span>
+                <span>Modo Demostración</span>
+              </span>
+            </div>
             <p className="text-xs text-gray-500">
               Revisa el texto de documentos y vincúlalos al postulante mediante su código anónimo.
             </p>

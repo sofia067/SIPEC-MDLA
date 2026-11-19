@@ -12,7 +12,7 @@ const requestSchema = z.object({
   reason: z.string().trim().min(10).max(4000),
   priority: z.enum(['Alta', 'Media', 'Baja']).default('Media'),
   requiredBy: z.union([z.literal(''), z.iso.date()]).optional().transform((value) => value || null),
-  applicationDeadline: z.iso.date(),
+ applicationDeadline: z.union([z.literal(''), z.iso.date()]).optional().transform((value) => value || null),
   applicationDocuments: applicationDocumentsSchema.default([]),
 });
 

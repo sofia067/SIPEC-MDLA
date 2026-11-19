@@ -4,7 +4,6 @@ import Login from './pages/Login';
 import PortalPostulante from './pages/PortalPostulante';
 import LoginPostulante from './pages/LoginPostulante';
 import PasswordRecovery from './pages/PasswordRecovery';
-import PortalPostulacion from './pages/PortalPostulacion';
 import Dashboard from './pages/Dashboard';
 import SolicitudesCobertura from './pages/SolicitudesCobertura';
 import PerfilPuesto from './pages/PerfilPuesto';
@@ -38,8 +37,7 @@ function App() {
           <Route path="/" element={<Login />} />
           <Route path="/postulante/login" element={<LoginPostulante />} />
           <Route path="/recuperar-contrasena" element={<PasswordRecovery />} />
-          <Route path="/postular" element={<PortalPostulacion />} />
-          <Route path="/postulante/demo" element={<PortalPostulante />} />
+          <Route path="/postular" element={<PortalPostulante />} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/solicitudes-cobertura" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><SolicitudesCobertura /></ProtectedRole></ProtectedRoute>} />
           <Route path="/nueva-solicitud" element={<ProtectedRoute><ProtectedRole roles={ADMIN_RRHH_JEFE}><SolicitudesCobertura /></ProtectedRole></ProtectedRoute>} />

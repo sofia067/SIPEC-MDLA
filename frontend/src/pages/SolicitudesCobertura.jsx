@@ -5,13 +5,6 @@ import { apiRequest } from '../services/api';
 import { useAuth } from '../auth/AuthContext';
 import Sidebar from '../components/sidebar';
 
-const TIPOS_DOCUMENTO_POSTULACION = [
-  { type: 'professional_title', label: 'Título profesional' },
-  { type: 'experience_certificate', label: 'Certificado de experiencia laboral' },
-  { type: 'training_certificate', label: 'Certificado de capacitación' },
-  { type: 'other_certificate', label: 'Otro certificado solicitado' },
-];
-
 export default function SolicitudesCobertura() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -39,7 +32,6 @@ export default function SolicitudesCobertura() {
     priority: 'Media',
     requiredBy: '',
     applicationDeadline: '',
-    applicationDocuments: [],
   });
 
   const cargarSolicitudes = async () => {
@@ -91,7 +83,6 @@ export default function SolicitudesCobertura() {
         priority: 'Media',
         requiredBy: '',
         applicationDeadline: '',
-        applicationDocuments: [],
       });
       setSolicitudEnEdicion(null);
       setMostrarFormulario(false);
@@ -114,7 +105,6 @@ export default function SolicitudesCobertura() {
       priority: solicitud.prioridad,
       requiredBy: solicitud.required_by ? solicitud.required_by.slice(0, 10) : '',
       applicationDeadline: solicitud.application_deadline ? solicitud.application_deadline.slice(0, 10) : '',
-      applicationDocuments: solicitud.application_documents ?? [],
     });
     setError('');
     setMensaje('');
@@ -141,14 +131,12 @@ export default function SolicitudesCobertura() {
     setActualizandoEstado(true);
     setError('');
     try {
-      const { request } = await apiRequest(`/requests/${solicitudSeleccionada.requestId}/status`, {
+      await apiRequest(`/requests/${solicitudSeleccionada.requestId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
-      setSolicitudSeleccionada((current) => current
-        ? { ...current, estado: request.status }
-        : current);
-      await cargarSolicitudes();
+      setSolicitudSeleccionada(null); 
+      await cargarSolicitudes(); 
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -164,28 +152,11 @@ export default function SolicitudesCobertura() {
       priority: 'Media',
       requiredBy: '',
       applicationDeadline: '',
-      applicationDocuments: [],
     });
     setSolicitudEnEdicion(null);
     setMensaje('');
     setMostrarFormulario(false);
     if (location.pathname === '/nueva-solicitud') navigate('/solicitudes-cobertura');
-  };
-  const cambiarDocumentoPostulacion = (type, checked) => {
-    setFormulario((current) => ({
-      ...current,
-      applicationDocuments: checked
-        ? [...current.applicationDocuments, { type, required: true }]
-        : current.applicationDocuments.filter((document) => document.type !== type),
-    }));
-  };
-  const cambiarObligatoriedadDocumento = (type, required) => {
-    setFormulario((current) => ({
-      ...current,
-      applicationDocuments: current.applicationDocuments.map((document) => (
-        document.type === type ? { ...document, required } : document
-      )),
-    }));
   };
 
   const estadoLabel = (status) => ({
@@ -195,9 +166,11 @@ export default function SolicitudesCobertura() {
     rejected: 'Rechazado',
     completed: 'Completado',
   }[status] ?? status);
+
   const fechaLabel = (date) => date
     ? new Intl.DateTimeFormat('es-PE').format(new Date(date.length === 10 ? `${date}T12:00:00` : date))
     : '—';
+
   const fechaMinima = () => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -215,9 +188,19 @@ export default function SolicitudesCobertura() {
         method: 'PATCH',
         body: JSON.stringify({ applicationDeadline: fechaExtension }),
       });
+      
       setSolicitudSeleccionada((current) => current
-        ? { ...current, ...request }
+        ? { 
+            ...current, 
+            estado: request.status,
+            ...request,
+            requestId: request.id,
+            id: request.code,
+            area: request.department || current.area,
+            puesto: request.position_title || current.puesto,
+          }
         : current);
+        
       setFechaExtension('');
       setMostrarExtension(false);
       setMensaje(esAmpliacion ? 'La fecha límite se amplió correctamente.' : 'La fecha límite se estableció correctamente.');
@@ -255,11 +238,17 @@ export default function SolicitudesCobertura() {
           )}
           
           {!mostrarFormulario ? (
-            /* Vista 1: Tabla de Historial General */
+            /* Tabla de Historial General */
             <>
               <div className="flex justify-between items-center">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Convocatorias de Personal</h2>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-2xl font-bold text-gray-900">Convocatorias de Personal</h2>
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-full shadow-sm">
+                      <span>⚡</span>
+                      <span>Modo Demostración</span>
+                    </span>
+                  </div>
                   <p className="text-xs text-gray-500">Historial general de requerimientos de personal por área</p>
                 </div>
 
@@ -314,8 +303,7 @@ export default function SolicitudesCobertura() {
                           <div className="flex items-center justify-end gap-3">
                             <button
                               onClick={() => setSolicitudSeleccionada(sol)}
-                              className="text-blue-900 font-bold hover:underline"
-                            >
+                              className="text-blue-900 font-bold hover:underline" >
                               Ver detalle
                             </button>
                             {sol.estado === 'pending' && ['admin', 'hr_specialist'].includes(user?.role) && (
@@ -347,7 +335,7 @@ export default function SolicitudesCobertura() {
               </div>
             </>
           ) : (
-            /* Vista 2: Formulario de Nueva Solicitud */
+            /* Formulario de Nueva Solicitud */
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <h2 className="text-xl font-bold text-gray-900">{solicitudEnEdicion ? `Editar convocatoria ${solicitudEnEdicion.code}` : 'Nueva Convocatoria de Personal'}</h2>
@@ -401,44 +389,11 @@ export default function SolicitudesCobertura() {
                       className="w-full border border-gray-300 p-2.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-900" />
                   </div>
                   <div>
-                    <label className="font-semibold text-gray-700 block mb-1.5">Fecha límite de postulación</label>
-                    <input type="date" required min={fechaMinima()} value={formulario.applicationDeadline}
+                    <label className="font-semibold text-gray-700 block mb-1.5">Fecha límite de postulación (opcional)</label>
+                    <input type="date" min={fechaMinima()} value={formulario.applicationDeadline}
                       onChange={(event) => setFormulario({ ...formulario, applicationDeadline: event.target.value })}
                       className="w-full border border-gray-300 p-2.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-900" />
                   </div>
-                  <fieldset className="space-y-3 rounded-lg border border-gray-200 p-4">
-                    <legend className="px-1 text-sm font-semibold text-gray-800">Documentos para postular</legend>
-                    <p className="text-xs text-gray-600">
-                      El currículum siempre se solicita. Selecciona otros documentos para que aparezcan en el portal y define si cada uno será obligatorio u opcional.
-                    </p>
-                    {TIPOS_DOCUMENTO_POSTULACION.map(({ type, label }) => {
-                      const configuredDocument = formulario.applicationDocuments.find((document) => document.type === type);
-                      return (
-                        <div key={type} className="flex flex-wrap items-center justify-between gap-3 text-sm">
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(configuredDocument)}
-                              onChange={(event) => cambiarDocumentoPostulacion(type, event.target.checked)}
-                              className="h-4 w-4 accent-blue-900"
-                            />
-                            <span>{label}</span>
-                          </label>
-                          {configuredDocument && (
-                            <select
-                              aria-label={`Requisito de ${label}`}
-                              value={configuredDocument.required ? 'required' : 'optional'}
-                              onChange={(event) => cambiarObligatoriedadDocumento(type, event.target.value === 'required')}
-                              className="rounded border border-gray-300 bg-white px-2 py-1 text-xs"
-                            >
-                              <option value="required">Obligatorio</option>
-                              <option value="optional">Opcional</option>
-                            </select>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </fieldset>
                 </div>
 
                 <div className="bg-gray-50 p-5 rounded-xl border border-gray-200 space-y-4 text-sm h-fit">

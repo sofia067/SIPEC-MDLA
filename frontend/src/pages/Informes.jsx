@@ -95,7 +95,13 @@ export default function Informes() {
 
         <main className="p-4 sm:p-8 space-y-6">
           <div className="border-b pb-4">
+            <div className="flex items-center gap-3">
             <h2 className="text-2xl font-bold text-gray-900">Informes de gestión</h2>
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-full shadow-sm">
+                <span>⚡</span>
+                <span>Modo Demostración</span>
+              </span>
+            </div>
             <p className="mt-1 text-sm text-gray-600">Indicadores y seguimiento de convocatorias de personal.</p>
           </div>
 

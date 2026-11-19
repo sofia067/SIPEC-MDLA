@@ -151,7 +151,13 @@ export default function PerfilPuesto() {
           {error && <div role="alert" className="rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
+              <div className="flex items-center gap-3">
               <h2 className="text-2xl font-bold">Perfiles de Puesto</h2>
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-full shadow-sm">
+                  <span>⚡</span>
+                  <span>Modo Demostración</span>
+                </span>
+              </div>
               <p className="text-sm text-gray-500">Gestión de requisitos, competencias y funciones por unidad orgánica</p>
             </div>
             {puedeGestionarPerfiles && (

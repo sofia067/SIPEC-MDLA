@@ -152,7 +152,14 @@ export default function Trabajadores() {
 
           <div className="flex flex-col justify-between gap-4 border-b pb-4 sm:flex-row sm:items-center">
             <div>
+              <div className="flex items-center gap-3">
               <h2 className="text-2xl font-bold text-gray-900">Directorio de Trabajadores</h2>
+              {/* Etiqueta de Modo Demo para la presentación */}
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-full shadow-sm">
+                  <span>⚡</span>
+                  <span>Modo Demostración</span>
+                </span>
+              </div>
               <p className="text-xs text-gray-500">Registro unificado del personal de la Municipalidad Distrital de Los Aquijes</p>
             </div>
 

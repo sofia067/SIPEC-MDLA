@@ -1,49 +1,11 @@
-import { useState } from 'react';
+import { apiRequest } from '../services/api';
+import { useEffect, useState } from 'react';
 
 const dateInDays = (days) => {
   const date = new Date();
   date.setDate(date.getDate() + days);
   return date.toISOString().slice(0, 10);
 };
-
-const openings = [
-  {
-    id: 'demo-inspector',
-    code: 'DEMO-001',
-    position_title: 'Inspector(a) Tributario(a)',
-    department: 'Administración Tributaria',
-    description: 'Apoya las acciones de orientación, fiscalización y control tributario municipal.',
-    application_start_date: dateInDays(-3),
-    application_deadline: dateInDays(18),
-    education: 'Título profesional o técnico relacionado con administración, contabilidad o derecho.',
-    general_experience: 'Experiencia general en el sector público o privado.',
-    specific_experience: 'Experiencia en atención al público o fiscalización.',
-    technical_knowledge: 'Normativa tributaria municipal y herramientas ofimáticas.',
-    application_documents: [
-      { type: 'professional_title', required: true },
-      { type: 'experience_certificate', required: false },
-      { type: 'training_certificate', required: false },
-    ],
-  },
-  {
-    id: 'demo-orientador',
-    code: 'DEMO-002',
-    position_title: 'Orientador(a) al Contribuyente',
-    department: 'Atención al Ciudadano',
-    description: 'Brinda orientación clara y oportuna a los contribuyentes y vecinos.',
-    application_start_date: dateInDays(-1),
-    application_deadline: dateInDays(25),
-    education: 'Estudios técnicos o superiores en administración, comunicación o carreras afines.',
-    general_experience: 'Experiencia en atención al público.',
-    specific_experience: 'Experiencia en orientación o servicio al ciudadano.',
-    technical_knowledge: 'Atención al usuario y manejo de herramientas ofimáticas.',
-    application_documents: [
-      { type: 'professional_title', required: false },
-      { type: 'experience_certificate', required: true },
-      { type: 'training_certificate', required: false },
-    ],
-  },
-];
 
 const documentTypes = [
   { type: 'professional_title', label: 'Título profesional o técnico' },
@@ -70,14 +32,25 @@ const initialForm = {
   demoConfirmation: false,
 };
 
-const labelDate = (date) => new Intl.DateTimeFormat('es-PE').format(new Date(`${date}T12:00:00`));
-
 function PortalPostulante() {
+  const [openings, setOpenings] = useState([]);
+  const [cargandoOpenings, setCargandoOpenings] = useState(true);
   const [form, setForm] = useState(initialForm);
   const [resume, setResume] = useState(null);
   const [additionalDocuments, setAdditionalDocuments] = useState({});
   const [fileInputKey, setFileInputKey] = useState(0);
   
+  useEffect(() => {
+    apiRequest('/public/applications/openings')
+      .then((data) => {
+        setOpenings(data.openings ?? []);
+      })
+      .catch(() => {
+        setOpenings([]);
+      })
+      .finally(() => setCargandoOpenings(false));
+  }, []);
+
   const [applications, setApplications] = useState(() => {
     const savedApplications = localStorage.getItem('sipec_candidate_demo_applications');
     if (!savedApplications) return [];
@@ -98,6 +71,7 @@ function PortalPostulante() {
   });
   const [progress, setProgress] = useState(null);
   const [trackingError, setTrackingError] = useState('');
+  
   const selectedOpening = openings.find((opening) => opening.id === form.requestId);
 
   const updateField = (event) => {
@@ -126,7 +100,7 @@ function PortalPostulante() {
       return false;
     }
     if (selectedFiles.some((file) => !validatePdf(file))) {
-      setError('Cada certificado debe ser un PDF válido de hasta 5 MB.');
+      setError('Cada documento adjunto debe ser un PDF válido de hasta 5 MB.');
       setAdditionalDocuments((current) => ({ ...current, [type]: [] }));
       return false;
     }
@@ -150,17 +124,18 @@ function PortalPostulante() {
       return;
     }
 
-    const missingRequired = selectedOpening.application_documents
+    // Validación dinámica según lo que exija la convocatoria seleccionada
+    const missingRequired = (selectedOpening?.application_documents ?? [])
       .filter(({ type, required }) => required && !additionalDocuments[type]?.length)
       .map(({ type }) => documentTypes.find((item) => item.type === type)?.label)
       .filter(Boolean);
       
     if (missingRequired.length > 0) {
-      setError(`Adjunta los documentos obligatorios: ${missingRequired.join(', ')}.`);
+      setError(`Adjunta los documentos obligatorios requeridos: ${missingRequired.join(', ')}.`);
       return;
     }
-
-    const code = `DEMO-${Date.now().toString(36).toUpperCase()}`;
+    const numeroCorrelativo = String(applications.length + 1).padStart(2, '0');
+    const code = `POSTULANTE-${numeroCorrelativo}`;
     const createdAt = new Date().toISOString();
     const newApplication = {
       applicationCode: code,
@@ -168,8 +143,8 @@ function PortalPostulante() {
       fullName: form.fullName,
       email: form.email,
       phone: form.phone,
-      positionTitle: selectedOpening.position_title,
-      requestCode: selectedOpening.code,
+      positionTitle: selectedOpening?.position_title ?? 'Puesto de convocatoria',
+      requestCode: selectedOpening?.code ?? 'DEMO',
       processStage: 'application_received',
       processStageUpdatedAt: createdAt,
       history: [
@@ -250,9 +225,12 @@ function PortalPostulante() {
 
       <div className="mx-auto grid max-w-6xl gap-8 px-5 py-8 lg:grid-cols-[0.85fr_1.15fr] lg:py-12">
         <section>
-          <span className="inline-flex rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-900">
-            Modo demostración público
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-full shadow-sm">
+              <span>⚡</span>
+              <span>Modo Demostración</span>
+            </span>
+          </div>
           <h1 className="mt-5 text-3xl font-bold leading-tight text-blue-950 sm:text-4xl">
             Convocatorias y postulaciones
           </h1>
@@ -263,7 +241,7 @@ function PortalPostulante() {
           <div className="mt-8 space-y-4">
             {[
               ['1', 'Elige una convocatoria', 'Revisa el puesto, los requisitos y los documentos solicitados.'],
-              ['2', 'Completa tu postulación', 'Ingresa tus datos, adjunta tu CV y documentos en su campo.'],
+              ['2', 'Completa tu postulación', 'Ingresa tus datos, adjunta tu CV y documentos opcionales u obligatorios según la plaza.'],
               ['3', 'Consulta el avance', 'Usa el código generado y tu número de documento.'],
             ].map(([number, title, detail]) => (
               <div key={number} className="flex gap-3">
@@ -359,6 +337,16 @@ function PortalPostulante() {
                   </select>
                 </div>
 
+                {selectedOpening && (
+                  <div className="rounded-lg bg-slate-50 p-4 text-xs space-y-2 border border-slate-200 text-slate-600">
+                    <p className="font-semibold text-blue-950">Requisitos de la convocatoria:</p>
+                    <p><strong>Educación:</strong> {selectedOpening.education}</p>
+                    <p><strong>Exp. General:</strong> {selectedOpening.general_experience}</p>
+                    <p><strong>Exp. Específica:</strong> {selectedOpening.specific_experience}</p>
+                    <p><strong>Conocimientos:</strong> {selectedOpening.technical_knowledge}</p>
+                  </div>
+                )}
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label htmlFor="fullName" className="mb-1 block text-xs font-semibold text-slate-700">Nombres y apellidos</label>
@@ -386,6 +374,31 @@ function PortalPostulante() {
                   <input key={fileInputKey} id="resume" name="resume" type="file" accept="application/pdf,.pdf" required onChange={(event) => setResume(event.target.files?.[0] ?? null)} className="block w-full rounded-lg border border-slate-300 text-sm file:mr-4 file:border-0 file:bg-blue-50 file:px-4 file:py-2.5 file:font-semibold file:text-blue-900 hover:file:bg-blue-100" />
                 </div>
 
+   {selectedOpening?.application_documents && selectedOpening.application_documents.length > 0 && (
+  <div className="space-y-5">
+    <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Documentos de sustento (Opcionales para demostración):</p>
+    {selectedOpening.application_documents.map(({ type }) => {
+      const docInfo = documentTypes.find((d) => d.type === type);
+      if (!docInfo) return null;
+      return (
+        <div key={type}>
+          <label htmlFor={`doc-${type}`} className="mb-1.5 block text-sm font-semibold text-slate-700">
+            {docInfo.label} <span className="text-xs font-normal text-slate-400">(Opcional)</span>
+          </label>
+          <input
+            key={`${fileInputKey}-${type}`}
+            id={`doc-${type}`}
+            type="file"
+            accept="application/pdf,.pdf"
+            required={false} // <- Forzamos a que nunca sea obligatorio
+            onChange={(e) => updateDocuments(type, e.target.files)}
+            className="block w-full rounded-lg border border-slate-300 text-sm file:mr-4 file:border-0 file:bg-blue-50 file:px-4 file:py-2.5 file:font-semibold file:text-blue-900 hover:file:bg-blue-100"
+          />
+        </div>
+      );
+    })}
+  </div>
+)}
                 <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">
                   <input name="demoConfirmation" type="checkbox" checked={form.demoConfirmation} onChange={updateField} required className="mt-1 h-4 w-4 shrink-0 accent-blue-900" />
                   <span>Confirmo que los datos y archivos son correctos para este proceso de postulación.</span>

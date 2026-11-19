@@ -72,57 +72,88 @@ export default function CandidatosCompatibles() {
 
   useEffect(() => {
     apiRequest('/blind-selection/candidates')
-      .then(({ candidates: currentCandidates }) => {
-        setCandidatos(currentCandidates);
-        setSolicitudFiltro(
-          currentCandidates.find((candidate) => !candidate.is_demo)?.request_id
-            ?? currentCandidates[0]?.request_id
-            ?? '',
-        );
+      .then(({ candidates: apiCandidates }) => {
+        //lee las postulaciones enviadas desde el portal demostracion)local storage)
+ let localDemos = [];
+   try {
+      const saved = JSON.parse(localStorage.getItem('sipec_candidate_demo_applications') || '[]');
+      if (Array.isArray(saved)) {
+        localDemos = saved.map((app, index) => ({
+        id: `local-demo-${app.applicationCode || index}`,
+        request_id: app.requestCode || 'DEMO-REQ',
+        request_code: app.requestCode || 'DEMO-REQ',
+        position_title: app.positionTitle || 'Puesto de demostración',
+        priority: 'Alta',
+        department: 'Área Usuaria (Demo)',
+        reason: 'Postulación registrada desde el portal público en modo demostración.',
+        application_code: app.applicationCode,
+        process_stage: app.processStage || 'application_received',
+        match_status: 'calculated',
+        match_score: 88, // Puntaje referencial para la demostración
+        is_demo: true,
+        has_resume: true,
+        resume_reviewed_at: null,
+        match_breakdown: [
+        {
+           key: 'general',
+          label: 'Perfil y experiencia general (CV PDF)',
+          score: 88,
+          requiredTermCount: 5,
+          matchedTerms: ['Gestión pública', 'Experiencia verificada', 'Perfil compatible'],
+       },
+        ],
+           }));
+          }
+        } catch {
+          localDemos = [];
+        }   
+     // Unimos los candidatos del servidor con los enviados localmente
+    const allCandidates = [...localDemos, ...(apiCandidates || [])];
+    setCandidatos(allCandidates);
+
+    //  Selecciona por defecto la convocatoria más reciente que tenga candidatos
+        setSolicitudFiltro(allCandidates[0]?.request_id ?? '');
       })
       .catch((requestError) => setError(requestError.message))
       .finally(() => setCargando(false));
   }, []);
-
   return (
-    <div className="app-shell flex h-dvh flex-col bg-gray-100 font-sans text-gray-800 md:flex-row">
-      <Sidebar />
+  <div className="app-shell flex h-dvh flex-col bg-gray-100 font-sans text-gray-800 md:flex-row">
+     <Sidebar />
 
-      <div className="min-h-0 min-w-0 flex-1 flex flex-col overflow-y-auto">
-        {/* Header */}
-        <header className="bg-white border-b px-4 sm:px-8 py-3 flex justify-between items-center gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-bold text-blue-950">SIPEC-MLA</h1>
-            <span className="text-xs bg-emerald-100 text-emerald-800 font-semibold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+    <div className="min-h-0 min-w-0 flex-1 flex flex-col overflow-y-auto">
+        
+      <header className="bg-white border-b px-4 sm:px-8 py-3 flex justify-between items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+           <h1 className="text-xl font-bold text-blue-950">SIPEC-MLA</h1>
+         <span className="text-xs bg-emerald-100 text-emerald-800 font-semibold px-2.5 py-0.5 rounded-full flex items-center gap-1">
               🔒 Selección Ciega Activa
-            </span>
+         </span>
           </div>
-          <UserDropdown />
-        </header>
+        <UserDropdown />
+      </header>
 
-        {/* Contenido Principal */}
-        <main className="p-4 sm:p-8 space-y-6">
-          <div className="flex flex-col xl:flex-row xl:justify-between xl:items-end gap-4 border-b pb-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-2xl font-bold text-gray-900">Candidatos Compatibles</h2>
-              </div>
-              <p className="text-xs text-gray-500">
+    <main className="p-4 sm:p-8 space-y-6">
+      <div className="flex flex-col xl:flex-row xl:justify-between xl:items-end gap-4 border-b pb-4">
+       <div>
+          <div className="flex items-center gap-2">
+             <h2 className="text-2xl font-bold text-gray-900">Candidatos Compatibles</h2>
+             </div>
+           <p className="text-xs text-gray-500">
                 Compatibilidad estimada entre el CV y los requisitos del puesto. Los resultados son referenciales y no reemplazan la revisión de RR. HH.
-              </p>
-            </div>
+           </p>
+       </div>
 
             {/* Selector de Solicitud de Cobertura */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 text-xs">
-              <label className="font-semibold text-gray-700">Convocatoria:</label>
-              <select
-                value={solicitudFiltro}
-                onChange={(e) => {
-                  setSolicitudFiltro(e.target.value);
-                  setCandidatoSeleccionado(null);
+         <div className="flex flex-col sm:flex-row sm:items-center gap-2 text-xs">
+          <label className="font-semibold text-gray-700">Convocatoria:</label>
+           <select
+              value={solicitudFiltro}
+               onChange={(e) => {
+                 setSolicitudFiltro(e.target.value);
+                 setCandidatoSeleccionado(null);
                 }}
-                className="w-full sm:w-auto border bg-white px-3 py-1.5 rounded-lg font-medium text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
-              >
+                className="w-full sm:w-auto border bg-white px-3 py-1.5 rounded-lg font-medium text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-900"  >
                 {solicitudes.map((solicitud) => (
                   <option key={solicitud.id} value={solicitud.id}>
                     {solicitud.codigo} | {solicitud.puesto} ({solicitud.prioridad})
@@ -234,22 +265,19 @@ export default function CandidatosCompatibles() {
                 <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                   <button
                     onClick={() => setCandidatoSeleccionado(cand)}
-                    className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs px-3 py-2 rounded-lg font-semibold transition-colors"
-                  >
+                    className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs px-3 py-2 rounded-lg font-semibold transition-colors" >
                     Ver Criterios
                   </button>
                   <button
                     onClick={() => revisarCv(cand)}
                     disabled={!cand.has_resume}
-                    className="bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-xs px-3 py-2 rounded-lg font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                  >
+                    className="bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-xs px-3 py-2 rounded-lg font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50">
                     Revisar CV ciego
                   </button>
                   <button
                     onClick={() => navigate(`/validacion-ocr?candidateId=${encodeURIComponent(cand.id)}`)}
                     disabled={!cand.has_resume}
-                    className="bg-blue-950 hover:bg-blue-900 text-white text-xs px-3 py-2 rounded-lg font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                  >
+                    className="bg-blue-950 hover:bg-blue-900 text-white text-xs px-3 py-2 rounded-lg font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50" >
                     Revisar CV en OCR →
                   </button>
                 </div>
@@ -270,8 +298,7 @@ export default function CandidatosCompatibles() {
               </div>
               <button
                 onClick={() => setCandidatoSeleccionado(null)}
-                className="text-gray-400 hover:text-gray-600 text-lg font-bold"
-              >
+                className="text-gray-400 hover:text-gray-600 text-lg font-bold"  >
                 ✕
               </button>
             </div>
@@ -308,8 +335,7 @@ export default function CandidatosCompatibles() {
                   setCandidatoSeleccionado(null);
                   navigate('/validacion-ocr');
                 }}
-                className="w-full bg-blue-950 text-white py-2 rounded-lg font-bold text-xs hover:bg-blue-900"
-              >
+                className="w-full bg-blue-950 text-white py-2 rounded-lg font-bold text-xs hover:bg-blue-900" >
                 Continuar a Validación Documental (OCR)
               </button>
             </div>
@@ -323,8 +349,7 @@ export default function CandidatosCompatibles() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="resume-review-title"
-            className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl"
-          >
+            className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl" >
             <header className="flex items-start justify-between gap-4 border-b p-5">
               <div>
                 <h3 id="resume-review-title" className="font-mono text-lg font-bold text-gray-900">
@@ -336,8 +361,7 @@ export default function CandidatosCompatibles() {
                 type="button"
                 onClick={() => setCvSeleccionado(null)}
                 aria-label="Cerrar revisión del CV"
-                className="text-lg font-bold text-gray-500 hover:text-gray-800"
-              >
+                className="text-lg font-bold text-gray-500 hover:text-gray-800" >
                 ✕
               </button>
             </header>

@@ -30,6 +30,8 @@ export const requestRepository = {
       );
       const sequenceResult = await client.query("SELECT nextval('coverage_request_code_seq') AS value");
       const code = `SC-${String(sequenceResult.rows[0].value).padStart(5, '0')}`;
+      const deadlineValue = applicationDeadline ? applicationDeadline : null;
+
       const requestResult = await client.query(
         `INSERT INTO coverage_requests
            (code, department_id, position_id, reason, priority, required_by,
@@ -128,7 +130,7 @@ export const requestRepository = {
        JOIN departments d ON d.id = r.department_id
        JOIN position_profiles p ON p.id = r.position_id
        WHERE r.status = 'approved'
-         AND r.application_deadline >= CURRENT_DATE
+         AND (r.application_deadline IS NULL OR r.application_deadline >= CURRENT_DATE)
        ORDER BY r.updated_at DESC, p.title`,
     );
     return result.rows;
@@ -140,10 +142,7 @@ export const requestRepository = {
       await client.query('BEGIN');
       const result = await client.query(
         `UPDATE coverage_requests SET status = $2::request_status, reviewed_by = $3, reviewed_at = now(), updated_at = now()
-         WHERE id = $1 AND (
-           (status = 'pending' AND $2::request_status IN ('in_review', 'approved', 'rejected')) OR
-           (status = 'in_review' AND $2::request_status IN ('approved', 'rejected', 'pending'))
-         )
+         WHERE id = $1 
          RETURNING id, code, status, updated_at`,
         [id, status, userId],
       );

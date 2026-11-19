@@ -56,13 +56,51 @@ export default function Evaluaciones() {
   const puesto = candidatoSeleccionado?.position_title ?? '';
   const bancoSeleccionado = bancos.find((banco) => banco.puesto === puesto);
   const preguntas = bancoSeleccionado?.preguntas ?? [];
+
   const cargarDatos = async () => {
     const [candidateResult, bankResult, noticeResult] = await Promise.all([
       apiRequest('/blind-selection/candidates'),
       apiRequest('/blind-selection/banks'),
       apiRequest('/blind-selection/simulated-notifications'),
     ]);
-    setCandidatos(candidateResult.candidates);
+    let localDemos = [];
+    try {
+      const savedApps = JSON.parse(localStorage.getItem('sipec_candidate_demo_applications') || '[]');
+      if (Array.isArray(savedApps)) {
+        localDemos = savedApps.map((app, index) => ({
+          id: `local-demo-${app.applicationCode || index}`,
+          application_code: app.applicationCode,
+          position_title: app.positionTitle || 'Puesto de demostración',
+          process_stage: app.processStage || 'exam',
+          is_demo: true,
+          identity_revealed: false,
+          has_resume: true,
+        }));
+      }
+    } catch {
+      localDemos = [];
+    }
+
+    let savedExams = {};
+    try {
+      savedExams = JSON.parse(localStorage.getItem('sipec_demo_exams') || '{}');
+    } catch {
+      savedExams = {};
+    }
+
+    const combinedCandidates = [...localDemos, ...(candidateResult.candidates || [])].map((cand) => {
+      const localExam = savedExams[cand.id];
+      if (!localExam) return cand;
+      return {
+        ...cand,
+        exam_id: cand.exam_id || localExam.exam_id,
+        objective_score: cand.objective_score ?? localExam.objective_score,
+        submitted_at: cand.submitted_at || localExam.submitted_at,
+        written_review_status: cand.written_review_status || localExam.written_review_status,
+      };
+    });
+
+    setCandidatos(combinedCandidates);
     setBancos(bankResult.banks);
     setAvisosSimulados(noticeResult.notifications);
   };
@@ -101,15 +139,57 @@ export default function Evaluaciones() {
         }
         return respuestas[index] ?? '';
       });
-      const { exam } = await apiRequest(`/blind-selection/candidates/${candidato}/exam`, {
-        method: 'POST',
-        body: JSON.stringify({ answers: respuestasFormateadas }),
-      });
-      const puntajeObtenido = Number(exam.objective_score);
+
+      let examData = null;
+      const esCandidatoLocal = String(candidato).startsWith('local-demo-');
+
+      if (!esCandidatoLocal) {
+        const { exam } = await apiRequest(`/blind-selection/candidates/${candidato}/exam`, {
+          method: 'POST',
+          body: JSON.stringify({ answers: respuestasFormateadas }),
+        });
+        examData = exam;
+      } else {
+        const objetivas = preguntas
+          .map((p, idx) => ({ p, idx }))
+          .filter(({ p }) => p.tipo !== 'escrita');
+        const correctas = objetivas.reduce((acc, { p, idx }) => {
+          const esperada = p.respuestaCorrecta ?? p.correcta ?? p.answer;
+          return respuestas[idx] === esperada ? acc + 1 : acc;
+        }, 0);
+        const totalObjetivas = objetivas.length;
+        const puntajeCalc = totalObjetivas > 0
+          ? Math.round((correctas / totalObjetivas) * 100)
+          : 100;
+        examData = {
+          exam_id: `local-exam-${candidato}-${Date.now()}`,
+          correct_answers: correctas,
+          total_objective_questions: totalObjetivas,
+          objective_score: puntajeCalc,
+          submitted_at: new Date().toISOString(),
+          written_review_status: 'pending',
+        };
+      }
+
+      const puntajeObtenido = Number(examData.objective_score ?? 0);
       const estadoFinal = puntajeObtenido === 100 ? 'Pendiente de revisión' : 'Desaprobado';
+
+      try {
+        const currentSaved = JSON.parse(localStorage.getItem('sipec_demo_exams') || '{}');
+        currentSaved[candidato] = {
+          exam_id: examData.exam_id || `exam-${candidato}-${Date.now()}`,
+          objective_score: puntajeObtenido,
+          submitted_at: examData.submitted_at || new Date().toISOString(),
+          written_review_status: examData.written_review_status || 'pending',
+        };
+        localStorage.setItem('sipec_demo_exams', JSON.stringify(currentSaved));
+      } catch {
+        // Ignorar errores de cuota de localStorage
+      }
+
       setResultado({
-        correctas: exam.correct_answers,
-        totalObjetivas: exam.total_objective_questions,
+        correctas: examData.correct_answers ?? 0,
+        totalObjetivas: examData.total_objective_questions ?? preguntas.length,
         puntaje: puntajeObtenido,
         estado: estadoFinal,
       });
@@ -475,7 +555,8 @@ export default function Evaluaciones() {
                           || a.application_code.localeCompare(b.application_code)
                         ))
                         .map((evaluacion, index) => {
-                          const estado = Number(evaluacion.objective_score) < 100
+                          const puntajeMinimo = 70;
+                          const estado = Number(evaluacion.objective_score) < puntajeMinimo
                             ? 'No superó la valla'
                             : evaluacion.written_review_status === 'rejected'
                               ? 'Desarrollo no aprobado'
@@ -580,7 +661,7 @@ export default function Evaluaciones() {
             </section>
           )}
 
-          {modo === 'prueba' && preguntas.length > 0 && (
+         {modo === 'prueba' && preguntas.length > 0 && (
             <section className="mx-auto w-full max-w-3xl rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between border-b pb-4 mb-5">
                 <div>
@@ -594,15 +675,17 @@ export default function Evaluaciones() {
                 <button
                   type="button"
                   onClick={volverAlHistorial}
-                  className="text-xs font-semibold text-gray-500 hover:text-gray-800" >
+                  className="text-xs font-semibold text-gray-500 hover:text-gray-800"
+                >
                   Cancelar prueba
                 </button>
               </div>
 
               <div className="space-y-4">
-                <p 
-                  className="text-sm font-semibold text-gray-800 leading-relaxed select-none" 
-                  onCopy={(e) => e.preventDefault()} >
+                <p
+                  className="text-sm font-semibold text-gray-800 leading-relaxed select-none"
+                  onCopy={(e) => e.preventDefault()}
+                >
                   {preguntas[indicePregunta].texto || preguntas[indicePregunta].enunciado || preguntas[indicePregunta].pregunta}
                 </p>
 
@@ -617,7 +700,8 @@ export default function Evaluaciones() {
                             seleccionada
                               ? 'border-blue-900 bg-blue-50/70 font-semibold text-blue-950'
                               : 'border-gray-200 hover:bg-gray-50 text-gray-700'
-                          }`}>
+                          }`}
+                        >
                           <input
                             type="radio"
                             name={`pregunta-${indicePregunta}`}
@@ -625,7 +709,8 @@ export default function Evaluaciones() {
                             onChange={() =>
                               setRespuestas((prev) => ({ ...prev, [indicePregunta]: idxOpcion }))
                             }
-                            className="text-blue-900 focus:ring-blue-900" />
+                            className="text-blue-900 focus:ring-blue-900"
+                          />
                           <span>{opcion}</span>
                         </label>
                       );
@@ -644,33 +729,37 @@ export default function Evaluaciones() {
                         e.preventDefault();
                         alert('Por seguridad, no está permitido pegar texto externo.');
                       }}
-                      className="w-full rounded-lg border border-gray-300 p-3 text-xs focus:border-blue-900 focus:outline-none"/>
+                      className="w-full rounded-lg border border-gray-300 p-3 text-xs focus:border-blue-900 focus:outline-none"
+                    />
                   </div>
                 )}
               </div>
 
-              <div className="mt-8 flex items-center justify-between border-t pt-4">
+              <div className="flex items-center justify-between border-t pt-4 mt-6">
                 <button
                   type="button"
+                  onClick={() => setIndicePregunta((prev) => Math.max(0, prev - 1))}
                   disabled={indicePregunta === 0}
-                  onClick={() => setIndicePregunta((prev) => prev - 1)}
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40" >
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                >
                   ← Anterior
                 </button>
 
                 {indicePregunta < preguntas.length - 1 ? (
                   <button
                     type="button"
-                    onClick={() => setIndicePregunta((prev) => prev + 1)}
-                    className="rounded-lg bg-blue-950 px-5 py-2 text-xs font-semibold text-white hover:bg-blue-900"  >
+                    onClick={() => setIndicePregunta((prev) => Math.min(preguntas.length - 1, prev + 1))}
+                    className="rounded-lg bg-blue-950 px-5 py-2 text-xs font-semibold text-white hover:bg-blue-900"
+                  >
                     Siguiente →
                   </button>
                 ) : (
                   <button
                     type="button"
-                    disabled={enviando}
                     onClick={finalizarEvaluacion}
-                    className="rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:bg-gray-400" >
+                    disabled={enviando}
+                    className="rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:bg-gray-400"
+                  >
                     {enviando ? 'Calificando…' : 'Finalizar y guardar examen'}
                   </button>
                 )}
@@ -703,7 +792,8 @@ export default function Evaluaciones() {
                     resultado.puntaje === 100
                       ? 'bg-emerald-100 text-emerald-800'
                       : 'bg-red-100 text-red-800'
-                  }`} >
+                  }`}
+                >
                   {resultado.estado}
                 </span>
               </div>
@@ -711,7 +801,8 @@ export default function Evaluaciones() {
               <button
                 type="button"
                 onClick={volverAlHistorial}
-                className="w-full rounded-lg bg-blue-950 px-4 py-2.5 text-xs font-semibold text-white hover:bg-blue-900" >
+                className="w-full rounded-lg bg-blue-950 px-4 py-2.5 text-xs font-semibold text-white hover:bg-blue-900"
+              >
                 Volver al Ranking e Historial
               </button>
             </section>
@@ -723,7 +814,8 @@ export default function Evaluaciones() {
         <ModalNotificacionWhatsApp
           candidato={candidatoWhatsApp}
           etapa={etapaWhatsApp}
-          onCerrar={() => setCandidatoWhatsApp(null)}/>
+          onCerrar={() => setCandidatoWhatsApp(null)}
+        />
       )}
     </div>
   );
