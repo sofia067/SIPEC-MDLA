@@ -5,6 +5,8 @@ import { apiRequest } from '../services/api';
 import { useAuth } from '../auth/AuthContext';
 import Sidebar from '../components/sidebar';
 
+const ESTADOS_PERMITIDOS_EDICION_ELIMINACION = ['pending', 'in_review'];
+
 export default function SolicitudesCobertura() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -112,7 +114,7 @@ export default function SolicitudesCobertura() {
   };
 
   const eliminarSolicitud = async (solicitud) => {
-    if (!window.confirm(`¿Eliminar la solicitud ${solicitud.id}? Esta acción solo es posible si está pendiente y no tiene documentos, evaluaciones ni asignaciones asociados.`)) return;
+    if (!window.confirm(`¿Eliminar la solicitud ${solicitud.id}? Esta acción eliminará el registro si no tiene documentos, evaluaciones ni asignaciones asociados.`)) return;
     setEliminando(solicitud.requestId);
     setError('');
     try {
@@ -135,8 +137,8 @@ export default function SolicitudesCobertura() {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
-      setSolicitudSeleccionada(null); 
-      await cargarSolicitudes(); 
+      setSolicitudSeleccionada(null);
+      await cargarSolicitudes();
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -188,10 +190,10 @@ export default function SolicitudesCobertura() {
         method: 'PATCH',
         body: JSON.stringify({ applicationDeadline: fechaExtension }),
       });
-      
+
       setSolicitudSeleccionada((current) => current
-        ? { 
-            ...current, 
+        ? {
+            ...current,
             estado: request.status,
             ...request,
             requestId: request.id,
@@ -200,7 +202,7 @@ export default function SolicitudesCobertura() {
             puesto: request.position_title || current.puesto,
           }
         : current);
-        
+
       setFechaExtension('');
       setMostrarExtension(false);
       setMensaje(esAmpliacion ? 'La fecha límite se amplió correctamente.' : 'La fecha límite se estableció correctamente.');
@@ -236,7 +238,7 @@ export default function SolicitudesCobertura() {
               {error}
             </div>
           )}
-          
+
           {!mostrarFormulario ? (
             /* Tabla de Historial General */
             <>
@@ -252,7 +254,7 @@ export default function SolicitudesCobertura() {
                   <p className="text-xs text-gray-500">Historial general de requerimientos de personal por área</p>
                 </div>
 
-                <button 
+                <button
                   onClick={() => setMostrarFormulario(true)}
                   className="bg-blue-950 hover:bg-blue-900 text-white font-semibold text-xs px-4 py-2.5 rounded-lg transition-colors flex items-center gap-2 shadow-sm"
                 >
@@ -303,10 +305,11 @@ export default function SolicitudesCobertura() {
                           <div className="flex items-center justify-end gap-3">
                             <button
                               onClick={() => setSolicitudSeleccionada(sol)}
-                              className="text-blue-900 font-bold hover:underline" >
+                              className="text-blue-900 font-bold hover:underline"
+                            >
                               Ver detalle
                             </button>
-                            {sol.estado === 'pending' && ['admin', 'hr_specialist'].includes(user?.role) && (
+                            {ESTADOS_PERMITIDOS_EDICION_ELIMINACION.includes(sol.estado) && ['admin', 'hr_specialist'].includes(user?.role) && (
                               <>
                                 <button onClick={() => editarSolicitud(sol)} className="font-semibold text-black hover:underline">
                                   Editar
@@ -339,7 +342,7 @@ export default function SolicitudesCobertura() {
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <h2 className="text-xl font-bold text-gray-900">{solicitudEnEdicion ? `Editar convocatoria ${solicitudEnEdicion.code}` : 'Nueva Convocatoria de Personal'}</h2>
-                <button 
+                <button
                   onClick={cancelarFormulario}
                   className="text-xs text-blue-900 hover:underline font-semibold flex items-center gap-1"
                 >
@@ -556,7 +559,7 @@ export default function SolicitudesCobertura() {
                       {actualizandoEstado ? 'Actualizando...' : 'Retirar del portal'}
                     </button>
                   )}
-                  {solicitudSeleccionada.estado === 'pending' && (
+                  {ESTADOS_PERMITIDOS_EDICION_ELIMINACION.includes(solicitudSeleccionada.estado) && (
                     <>
                       <button
                         type="button"
