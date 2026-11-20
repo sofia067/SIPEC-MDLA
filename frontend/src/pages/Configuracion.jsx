@@ -66,6 +66,7 @@ export default function Configuracion() {
   const [usuarios, setUsuarios] = useState([]);
   const [cargandoUsuarios, setCargandoUsuarios] = useState(true);
   const [guardandoUsuario, setGuardandoUsuario] = useState(false);
+  const [eliminandoUsuarioId, setEliminandoUsuarioId] = useState('');
   const [usuarioEditando, setUsuarioEditando] = useState(null);
   const [formularioUsuario, setFormularioUsuario] = useState(usuarioNuevo);
   const [errorUsuarios, setErrorUsuarios] = useState('');
@@ -206,6 +207,31 @@ export default function Configuracion() {
       setErrorRestablecimientos(requestError.message);
     } finally {
       setSolicitudAtendiendo('');
+    }
+  };
+
+  const eliminarUsuario = async (usuario) => {
+    if (
+      !window.confirm(
+        `¿Eliminar permanentemente al usuario «${usuario.display_name}» (${usuario.username})? Esta acción no se puede deshacer.`
+      )
+    ) {
+      return;
+    }
+    setEliminandoUsuarioId(usuario.id);
+    setErrorUsuarios('');
+    setMensajeUsuarios('');
+    try {
+      await apiRequest(`/settings/users/${usuario.id}`, { method: 'DELETE' });
+      setUsuarios((actuales) => actuales.filter((item) => item.id !== usuario.id));
+      if (usuarioEditando?.id === usuario.id) {
+        cancelarEdicionUsuario();
+      }
+      setMensajeUsuarios('Usuario eliminado correctamente.');
+    } catch (requestError) {
+      setErrorUsuarios(`No se pudo eliminar el usuario: ${requestError.message}`);
+    } finally {
+      setEliminandoUsuarioId('');
     }
   };
 
@@ -444,15 +470,37 @@ export default function Configuracion() {
               <table className="w-full min-w-[640px] text-left text-sm">
                 <thead><tr className="border-b text-gray-500"><th className="pb-2 pr-4">Usuario</th><th className="pb-2 pr-4">Nombre</th><th className="pb-2 pr-4">Rol / área</th><th className="pb-2 pr-4">Estado</th><th className="pb-2">Acción</th></tr></thead>
                 <tbody className="divide-y divide-gray-100">
-                  {usuarios.map((usuario) => (
-                    <tr key={usuario.id}>
-                      <td className="py-3 pr-4 font-medium text-gray-900">{usuario.username}</td>
-                      <td className="py-3 pr-4">{usuario.display_name}</td>
-                      <td className="py-3 pr-4">{({ admin: 'Administrador', hr_specialist: 'Especialista RR.HH.', area_manager: 'Jefe de Área', committee: 'Rol anterior (sin acceso)' })[usuario.role] || 'Rol no reconocido'}<span className="block text-xs text-gray-500">{usuario.area_name || 'Sin área asignada'}</span></td>
-                      <td className="py-3 pr-4">{usuario.is_active ? 'Activo' : 'Inactivo'}</td>
-                      <td className="py-3"><button type="button" onClick={() => editarUsuario(usuario)} disabled={guardandoUsuario || usuario.username === 'admin'} className="font-semibold text-blue-900 hover:underline disabled:text-gray-400">Editar</button></td>
-                    </tr>
-                  ))}
+                  {usuarios.map((usuario) => {
+                    const esAdminProtegido = usuario.username === 'admin' || usuario.role === 'admin';
+                    return (
+                      <tr key={usuario.id}>
+                        <td className="py-3 pr-4 font-medium text-gray-900">{usuario.username}</td>
+                        <td className="py-3 pr-4">{usuario.display_name}</td>
+                        <td className="py-3 pr-4">{({ admin: 'Administrador', hr_specialist: 'Especialista RR.HH.', area_manager: 'Jefe de Área', committee: 'Rol anterior (sin acceso)' })[usuario.role] || 'Rol no reconocido'}<span className="block text-xs text-gray-500">{usuario.area_name || 'Sin área asignada'}</span></td>
+                        <td className="py-3 pr-4">{usuario.is_active ? 'Activo' : 'Inactivo'}</td>
+                        <td className="py-3">
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => editarUsuario(usuario)}
+                              disabled={guardandoUsuario || Boolean(eliminandoUsuarioId) || usuario.username === 'admin'}
+                              className="font-semibold text-blue-900 hover:underline disabled:text-gray-400"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => eliminarUsuario(usuario)}
+                              disabled={guardandoUsuario || Boolean(eliminandoUsuarioId) || esAdminProtegido}
+                              className="font-semibold text-red-700 hover:underline disabled:text-gray-400"
+                            >
+                              {eliminandoUsuarioId === usuario.id ? 'Eliminando…' : 'Eliminar'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {!cargandoUsuarios && usuarios.length === 0 && <tr><td colSpan="5" className="py-6 text-center text-gray-500">No hay usuarios registrados.</td></tr>}
                   {cargandoUsuarios && <tr><td colSpan="5" className="py-6 text-center text-gray-500">Cargando usuarios…</td></tr>}
                 </tbody>

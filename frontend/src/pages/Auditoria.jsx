@@ -47,7 +47,6 @@ const etiquetasRecurso = {
   assignment: 'Asignaciones',
   user: 'Usuarios',
   blind_candidate: 'Selección ciega',
-  application_settings: 'Configuración',
 };
 
 const obtenerAccion = (tipo) => {
@@ -102,13 +101,19 @@ export default function Auditoria() {
   const [usuario, setUsuario] = useState('');
   const [accion, setAccion] = useState('');
   const [criticidad, setCriticidad] = useState('');
+  const [paginaActual, setPaginaActual] = useState(1);
+  const [tamanoPagina, setTamanoPagina] = useState(25);
 
   useEffect(() => {
     apiRequest('/audit')
-      .then(({ events }) => setRegistros(events))
+      .then(({ events }) => setRegistros(events || []))
       .catch((requestError) => setError(requestError.message))
       .finally(() => setCargando(false));
   }, []);
+
+  useEffect(() => {
+    setPaginaActual(1);
+  }, [desde, hasta, usuario, accion, criticidad, tamanoPagina]);
 
   const usuarios = useMemo(() => [...new Map(
     registros.filter((event) => event.username)
@@ -123,6 +128,25 @@ export default function Auditoria() {
       && (!accion || obtenerAccion(event.event_type) === accion)
       && (!criticidad || obtenerCriticidad(event.event_type) === criticidad);
   }), [registros, desde, hasta, usuario, accion, criticidad]);
+
+  const totalPaginas = Math.max(1, Math.ceil(filtrados.length / tamanoPagina));
+  const paginaSegura = Math.min(paginaActual, totalPaginas);
+
+  const registrosPaginados = useMemo(() => {
+    const inicio = (paginaSegura - 1) * tamanoPagina;
+    return filtrados.slice(inicio, inicio + tamanoPagina);
+  }, [filtrados, paginaSegura, tamanoPagina]);
+
+  const hayFiltrosActivos = Boolean(desde || hasta || usuario || accion || criticidad);
+
+  const limpiarFiltros = () => {
+    setDesde('');
+    setHasta('');
+    setUsuario('');
+    setAccion('');
+    setCriticidad('');
+    setPaginaActual(1);
+  };
 
   return (
     <div className="app-shell print:h-auto flex h-dvh flex-col bg-gray-100 font-sans text-gray-800 md:flex-row">
@@ -150,18 +174,44 @@ export default function Auditoria() {
 
           {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">No se pudieron cargar los eventos de auditoría: {error}</div>}
 
-          <section aria-label="Filtros de auditoría" className="print:hidden grid gap-4 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-2 xl:grid-cols-5">
-            <label className="text-sm font-medium text-gray-700">Desde<input type="date" value={desde} max={hasta || undefined} onChange={(event) => setDesde(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5" /></label>
-            <label className="text-sm font-medium text-gray-700">Hasta<input type="date" value={hasta} min={desde || undefined} onChange={(event) => setHasta(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5" /></label>
-            <label className="text-sm font-medium text-gray-700">Usuario<select value={usuario} onChange={(event) => setUsuario(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5"><option value="">Todos los usuarios</option>{usuarios.map(([username, nombre]) => <option key={username} value={username}>{nombre}</option>)}</select></label>
-            <label className="text-sm font-medium text-gray-700">Tipo de acción<select value={accion} onChange={(event) => setAccion(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5"><option value="">Todas las acciones</option><option value="creation">Creación</option><option value="modification">Modificación</option><option value="deletion">Eliminación</option><option value="login">Login / cierre de sesión</option></select></label>
-            <label className="text-sm font-medium text-gray-700">Criticidad<select value={criticidad} onChange={(event) => setCriticidad(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5"><option value="">Todos los niveles</option><option value="Alta">Alta</option><option value="Media">Media</option><option value="Baja">Baja</option></select></label>
+          <section aria-label="Filtros de auditoría" className="print:hidden space-y-3 rounded-xl border border-gray-200 bg-white p-4">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              <label className="text-sm font-medium text-gray-700">Desde<input type="date" value={desde} max={hasta || undefined} onChange={(event) => setDesde(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5" /></label>
+              <label className="text-sm font-medium text-gray-700">Hasta<input type="date" value={hasta} min={desde || undefined} onChange={(event) => setHasta(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5" /></label>
+              <label className="text-sm font-medium text-gray-700">Usuario<select value={usuario} onChange={(event) => setUsuario(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5"><option value="">Todos los usuarios</option>{usuarios.map(([username, nombre]) => <option key={username} value={username}>{nombre}</option>)}</select></label>
+              <label className="text-sm font-medium text-gray-700">Tipo de acción<select value={accion} onChange={(event) => setAccion(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5"><option value="">Todas las acciones</option><option value="creation">Creación</option><option value="modification">Modificación</option><option value="deletion">Eliminación</option><option value="login">Login / cierre de sesión</option></select></label>
+              <label className="text-sm font-medium text-gray-700">Criticidad<select value={criticidad} onChange={(event) => setCriticidad(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5"><option value="">Todos los niveles</option><option value="Alta">Alta</option><option value="Media">Media</option><option value="Baja">Baja</option></select></label>
+            </div>
+            {hayFiltrosActivos && (
+              <div className="flex justify-end">
+                <button type="button" onClick={limpiarFiltros} className="text-sm font-semibold text-blue-900 hover:underline">
+                  Limpiar filtros
+                </button>
+              </div>
+            )}
           </section>
 
           <section aria-label="Registros de auditoría" className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b px-5 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
               <h3 className="font-semibold text-gray-900">Actividad registrada</h3>
-              <span className="text-sm text-gray-500" aria-live="polite">{filtrados.length} {filtrados.length === 1 ? 'registro' : 'registros'}</span>
+              <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
+                <label className="flex items-center gap-2">
+                  <span>Por página:</span>
+                  <select
+                    value={tamanoPagina}
+                    onChange={(event) => setTamanoPagina(Number(event.target.value))}
+                    className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700"
+                  >
+                    <option value={15}>15</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </label>
+                <span aria-live="polite">
+                  {filtrados.length} {filtrados.length === 1 ? 'registro' : 'registros'}
+                </span>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px] text-left text-sm">
@@ -172,7 +222,7 @@ export default function Auditoria() {
                   <th scope="col" className="px-4 py-3">Acción realizada</th><th scope="col" className="px-4 py-3">Criticidad</th>
                 </tr></thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filtrados.map((event) => (
+                  {registrosPaginados.map((event) => (
                     <tr key={event.id} className="hover:bg-gray-50">
                       <td className="whitespace-nowrap px-4 py-3 text-gray-600">{new Date(event.created_at).toLocaleString('es-PE')}</td>
                       <td className="px-4 py-3 font-medium text-gray-900">{event.display_name || event.username || 'Usuario no disponible'}</td>
@@ -187,6 +237,35 @@ export default function Auditoria() {
                 </tbody>
               </table>
             </div>
+
+            {!cargando && filtrados.length > 0 && (
+              <div className="print:hidden flex flex-wrap items-center justify-between gap-3 border-t bg-gray-50 px-5 py-3 text-sm text-gray-600">
+                <span>
+                  Mostrando {(paginaSegura - 1) * tamanoPagina + 1}–{Math.min(paginaSegura * tamanoPagina, filtrados.length)} de {filtrados.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPaginaActual((actual) => Math.max(1, actual - 1))}
+                    disabled={paginaSegura <= 1}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Anterior
+                  </button>
+                  <span className="px-2 font-medium text-gray-800">
+                    Página {paginaSegura} de {totalPaginas}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPaginaActual((actual) => Math.min(totalPaginas, actual + 1))}
+                    disabled={paginaSegura >= totalPaginas}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         </main>
       </div>
