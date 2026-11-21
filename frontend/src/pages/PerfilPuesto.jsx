@@ -21,11 +21,26 @@ const emptyProfile = {
   functions: '',
 };
 
-const toLines = (value) =>
-  value
+const ESTADOS_INACTIVOS = ['inactive', 'inactivo', 'desactivado', 'disabled'];
+
+const isInactiveStatus = (profile) =>
+  ESTADOS_INACTIVOS.includes(String(profile?.status ?? '').trim().toLocaleLowerCase());
+
+const esRegistroPrueba = (texto) =>
+  /\b(qa|prueba|test|fantasma)\b/i.test(String(texto ?? ''));
+
+const normalizeText = (value) =>
+  typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
+
+const toLines = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
+  return String(value ?? '')
     .split(/\r?\n/)
     .map((item) => item.trim())
     .filter(Boolean);
+};
 
 function ProfileField({ label, value, onChange, rows = 1, required = false, type = 'text', step }) {
   const className =
@@ -67,6 +82,7 @@ export default function PerfilPuesto() {
   });
   const [areaFilter, setAreaFilter] = useState('Todas');
   const [search, setSearch] = useState('');
+  const [mostrarInactivos, setMostrarInactivos] = useState(false);
   const [form, setForm] = useState(emptyProfile);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -79,7 +95,7 @@ export default function PerfilPuesto() {
     setLoading(true);
     try {
       const { profiles: loadedProfiles } = await apiRequest('/profiles');
-      setProfiles(loadedProfiles);
+      setProfiles(Array.isArray(loadedProfiles) ? loadedProfiles : []);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -91,30 +107,85 @@ export default function PerfilPuesto() {
     loadProfiles();
     if (puedeGestionarPerfiles) {
       apiRequest('/lookups')
-        .then(setLookupData)
+        .then((data) => {
+          setLookupData({
+            departments: Array.isArray(data?.departments) ? data.departments : [],
+            catalogData: {
+              positionLevels: Array.isArray(data?.catalogData?.positionLevels)
+                ? data.catalogData.positionLevels
+                : [],
+              educationLevels: Array.isArray(data?.catalogData?.educationLevels)
+                ? data.catalogData.educationLevels
+                : [],
+            },
+          });
+        })
         .catch((requestError) => setError(requestError.message));
     }
   }, [puedeGestionarPerfiles]);
 
+  function findDuplicateProfile() {
+    const cleanTitle = normalizeText(form.title);
+    const cleanDepartment = normalizeText(form.department);
+    const cleanCode = normalizeText(form.profileCode);
+
+    return profiles.find((profile) => {
+      if (isInactiveStatus(profile)) return false;
+
+      const sameTitleAndArea =
+        Boolean(cleanTitle) &&
+        Boolean(cleanDepartment) &&
+        normalizeText(profile.title) === cleanTitle &&
+        normalizeText(profile.department) === cleanDepartment;
+
+      const sameCode =
+        Boolean(cleanCode) &&
+        Boolean(profile.profile_code) &&
+        normalizeText(profile.profile_code) === cleanCode;
+
+      return sameTitleAndArea || sameCode;
+    });
+  }
+
   async function saveProfile(event) {
     event.preventDefault();
-    setSaving(true);
     setError('');
+
+    const duplicate = findDuplicateProfile();
+    if (duplicate) {
+      setError(
+        `Ya existe un perfil activo registrado con ese puesto en la misma unidad orgánica o con el mismo código («${duplicate.title}» — ${duplicate.department}).`
+      );
+      return;
+    }
+
+    setSaving(true);
     try {
+      const parsedSalary =
+        form.remuneration === '' || form.remuneration === null || form.remuneration === undefined
+          ? null
+          : Number(form.remuneration);
+
+      if (parsedSalary !== null && Number.isNaN(parsedSalary)) {
+        setError('La remuneración referencial debe ser un número válido.');
+        setSaving(false);
+        return;
+      }
+
       await apiRequest('/profiles', {
         method: 'POST',
         body: JSON.stringify({
-          title: form.title,
-          department: form.department,
-          level: form.level,
-          profileCode: form.profileCode,
-          remuneration: form.remuneration,
-          education: form.education,
-          generalExperience: form.generalExperience,
-          specificExperience: form.specificExperience,
-          technicalKnowledge: form.technicalKnowledge,
-          principalRequirements: form.principalRequirements,
-          description: form.description,
+          title: String(form.title).trim(),
+          department: String(form.department).trim(),
+          level: String(form.level).trim(),
+          profileCode: String(form.profileCode).trim(),
+          remuneration: parsedSalary,
+          education: String(form.education).trim(),
+          generalExperience: String(form.generalExperience).trim(),
+          specificExperience: String(form.specificExperience).trim(),
+          technicalKnowledge: String(form.technicalKnowledge).trim(),
+          principalRequirements: String(form.principalRequirements).trim(),
+          description: String(form.description).trim(),
           competencies: toLines(form.competencies).map((name) => ({ name, description: '' })),
           functions: toLines(form.functions),
         }),
@@ -132,7 +203,7 @@ export default function PerfilPuesto() {
   async function deactivateProfile(profile) {
     if (
       !window.confirm(
-        `¿Desactivar el perfil «${profile.title}»? Se conservará como inactivo en la base de datos.`
+        `¿Desactivar el perfil «${profile.title}»? Se ocultará de la vista activa y se conservará como inactivo.`
       )
     ) {
       return;
@@ -163,14 +234,49 @@ export default function PerfilPuesto() {
       await apiRequest(`/profiles/${profile.id}`, { method: 'DELETE' });
       await loadProfiles();
     } catch (requestError) {
-      setError(requestError.message);
+      setError(
+        `${requestError.message} (Si el perfil ya está asociado a convocatorias o postulaciones, usa «Desactivar» para retirarlo del flujo activo.)`
+      );
     } finally {
       setDeleting('');
     }
   }
 
-  const areas = [...new Set(profiles.map((profile) => profile.department).filter(Boolean))];
-  const filteredProfiles = profiles.filter((profile) => {
+  const visibleBaseProfiles = profiles.filter(
+    (profile) => mostrarInactivos || !isInactiveStatus(profile)
+  );
+
+  const areas = [...new Set(visibleBaseProfiles.map((profile) => profile.department).filter(Boolean))];
+
+  const availableDepartments = [
+    ...new Set([
+      ...lookupData.departments.map((department) => department.name),
+      ...profiles
+        .filter((profile) => !isInactiveStatus(profile))
+        .map((profile) => profile.department),
+      ...(form.department ? [form.department] : []),
+    ]),
+  ]
+    .filter((dept) => Boolean(dept) && !esRegistroPrueba(dept))
+    .sort((a, b) => a.localeCompare(b, 'es'));
+
+  const availableLevels = [
+    ...new Set([
+      ...lookupData.catalogData.positionLevels,
+      ...profiles.map((profile) => profile.level),
+      ...(form.level ? [form.level] : []),
+    ]),
+  ].filter(Boolean);
+
+  const availableEducations = [
+    ...new Set([
+      ...lookupData.catalogData.educationLevels,
+      ...profiles.map((profile) => profile.education),
+      ...(form.education ? [form.education] : []),
+    ]),
+  ].filter(Boolean);
+
+  const filteredProfiles = visibleBaseProfiles.filter((profile) => {
     const areaMatches = areaFilter === 'Todas' || profile.department === areaFilter;
     const query = search.toLocaleLowerCase();
     const textMatches = [
@@ -225,6 +331,7 @@ export default function PerfilPuesto() {
               <button
                 onClick={() => {
                   setError('');
+                  setForm(emptyProfile);
                   setShowForm(true);
                 }}
                 className="bg-blue-950 hover:bg-blue-900 text-white font-semibold text-sm px-4 py-2.5 rounded-lg"
@@ -234,26 +341,37 @@ export default function PerfilPuesto() {
             )}
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row gap-4">
-            <input
-              type="search"
-              placeholder="Buscar por puesto, código o requisitos..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="w-full md:w-2/3 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-            />
-            <select
-              value={areaFilter}
-              onChange={(event) => setAreaFilter(event.target.value)}
-              className="w-full md:w-1/3 border border-gray-300 rounded-lg p-2 text-sm"
-            >
-              <option value="Todas">Todas las unidades orgánicas</option>
-              {areas.map((area) => (
-                <option key={area} value={area}>
-                  {area}
-                </option>
-              ))}
-            </select>
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-3">
+            <div className="flex flex-col md:flex-row gap-4">
+              <input
+                type="search"
+                placeholder="Buscar por puesto, código o requisitos..."
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="w-full md:w-2/3 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <select
+                value={areaFilter}
+                onChange={(event) => setAreaFilter(event.target.value)}
+                className="w-full md:w-1/3 border border-gray-300 rounded-lg p-2 text-sm"
+              >
+                <option value="Todas">Todas las unidades orgánicas</option>
+                {areas.map((area) => (
+                  <option key={area} value={area}>
+                    {area}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label className="flex w-fit items-center gap-2 text-xs text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={mostrarInactivos}
+                onChange={(event) => setMostrarInactivos(event.target.checked)}
+                className="h-4 w-4 accent-blue-900"
+              />
+              Mostrar perfiles inactivos / desactivados
+            </label>
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
@@ -332,7 +450,11 @@ export default function PerfilPuesto() {
                 {!loading && filteredProfiles.length === 0 && (
                   <tr>
                     <td colSpan="6" className="py-6 text-center text-gray-500">
-                      {error ? 'No se pudieron cargar los perfiles.' : 'No hay perfiles registrados.'}
+                      {error
+                        ? 'No se pudieron cargar los perfiles.'
+                        : mostrarInactivos
+                          ? 'No hay perfiles que coincidan con el filtro.'
+                          : 'No hay perfiles activos registrados.'}
                     </td>
                   </tr>
                 )}
@@ -391,9 +513,9 @@ export default function PerfilPuesto() {
                     className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
                   >
                     <option value="">Selecciona un área</option>
-                    {lookupData.departments.map((department) => (
-                      <option key={department.name} value={department.name}>
-                        {department.name}
+                    {availableDepartments.map((departmentName) => (
+                      <option key={departmentName} value={departmentName}>
+                        {departmentName}
                       </option>
                     ))}
                   </select>
@@ -407,7 +529,7 @@ export default function PerfilPuesto() {
                     className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
                   >
                     <option value="">Selecciona un nivel o grupo</option>
-                    {lookupData.catalogData.positionLevels.map((level) => (
+                    {availableLevels.map((level) => (
                       <option key={level} value={level}>
                         {level}
                       </option>
@@ -429,7 +551,7 @@ export default function PerfilPuesto() {
                     className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
                   >
                     <option value="">Selecciona una formación</option>
-                    {lookupData.catalogData.educationLevels.map((education) => (
+                    {availableEducations.map((education) => (
                       <option key={education} value={education}>
                         {education}
                       </option>

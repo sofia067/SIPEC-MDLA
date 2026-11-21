@@ -4,9 +4,11 @@ import UserDropdown from '../components/UserDropdown';
 import { apiRequest } from '../services/api';
 import { useAuth } from '../auth/AuthContext';
 import Sidebar from '../components/sidebar';
-import catalogoPuestos from '../data/catalogoPuestos.json';
 
 const ESTADOS_PERMITIDOS_EDICION_ELIMINACION = ['pending'];
+
+const esRegistroPrueba = (texto) =>
+  /\b(qa|prueba|test|fantasma)\b/i.test(String(texto ?? ''));
 
 const emptyForm = (areaPredeterminada = '') => ({
   department: areaPredeterminada,
@@ -30,6 +32,7 @@ export default function SolicitudesCobertura() {
   const [solicitudEnEdicion, setSolicitudEnEdicion] = useState(null);
   const [solicitudes, setSolicitudes] = useState([]);
   const [areasDisponibles, setAreasDisponibles] = useState([]);
+  const [perfilesActivos, setPerfilesActivos] = useState([]);
   const [estadoFiltro, setEstadoFiltro] = useState('Todos');
   const [busqueda, setBusqueda] = useState('');
   const [cargando, setCargando] = useState(true);
@@ -69,41 +72,68 @@ export default function SolicitudesCobertura() {
 
   useEffect(() => {
     cargarSolicitudes();
+
     apiRequest('/lookups')
       .then(({ departments }) =>
-        setAreasDisponibles(Array.isArray(departments) ? departments.map(({ name }) => name) : [])
+        setAreasDisponibles(
+          Array.isArray(departments)
+            ? departments.map(({ name }) => name).filter((name) => !esRegistroPrueba(name))
+            : []
+        )
       )
       .catch((requestError) => setError(requestError.message));
+
+    apiRequest('/profiles')
+      .then(({ profiles }) => {
+        if (Array.isArray(profiles)) {
+          setPerfilesActivos(
+            profiles.filter(
+              (profile) =>
+                String(profile?.status ?? '').toLowerCase() === 'active' &&
+                !esRegistroPrueba(profile?.title) &&
+                !esRegistroPrueba(profile?.profile_code) &&
+                !esRegistroPrueba(profile?.department)
+            )
+          );
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
     setMostrarFormulario(location.pathname === '/nueva-solicitud');
   }, [location.pathname]);
 
-  const puestosDelCatalogo = Array.isArray(catalogoPuestos) ? catalogoPuestos : [];
-  const areasCatalogo = puestosDelCatalogo.map((item) => item.department).filter(Boolean);
   const todasLasAreas = [
     ...new Set([
       ...areasDisponibles,
-      ...areasCatalogo,
+      ...perfilesActivos.map((profile) => profile.department),
       ...(areaPredeterminada ? [areaPredeterminada] : []),
       ...(formulario.department ? [formulario.department] : []),
     ]),
   ]
-    .filter(Boolean)
+    .filter((area) => Boolean(area) && !esRegistroPrueba(area))
     .sort((a, b) => a.localeCompare(b, 'es'));
 
+  const puestosDisponibles = perfilesActivos.map((profile) => ({
+    id: profile.id,
+    code: profile.profile_code || profile.id,
+    title: profile.title,
+    department: profile.department,
+    reason: profile.description || '',
+  }));
+
   const puestosSugeridos = formulario.department
-    ? puestosDelCatalogo.filter(
+    ? puestosDisponibles.filter(
         (item) =>
           String(item.department || '').trim().toLocaleLowerCase() ===
           String(formulario.department).trim().toLocaleLowerCase()
       )
-    : puestosDelCatalogo;
+    : puestosDisponibles;
 
   const handleCambioPuesto = (value) => {
     const cleanValue = String(value ?? '');
-    const match = puestosDelCatalogo.find(
+    const match = puestosDisponibles.find(
       (item) =>
         String(item.title || '').trim().toLocaleLowerCase() ===
         cleanValue.trim().toLocaleLowerCase()
@@ -513,22 +543,22 @@ export default function SolicitudesCobertura() {
                     <label className="font-semibold text-gray-700 block mb-1.5">Puesto a cubrir</label>
                     <input
                       required
-                      list="catalogo-puestos-lista"
+                      list="perfiles-activos-lista"
                       minLength="2"
                       maxLength="160"
                       value={formulario.positionTitle}
                       onChange={(event) => handleCambioPuesto(event.target.value)}
                       className="w-full border border-gray-300 p-2.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
-                      placeholder="Elige del catálogo o escribe el nombre del puesto"
+                      placeholder="Elige un perfil activo o escribe el nombre del puesto"
                     />
-                    <datalist id="catalogo-puestos-lista">
+                    <datalist id="perfiles-activos-lista">
                       {puestosSugeridos.map((item) => (
-                        <option key={`${item.code}-${item.title}`} value={item.title} />
+                        <option key={`${item.id}-${item.title}`} value={item.title} />
                       ))}
                     </datalist>
                     {puestosSugeridos.length > 0 && (
                       <p className="mt-1 text-xs text-gray-500">
-                        {puestosSugeridos.length} puesto(s) sugerido(s) desde el catálogo para{' '}
+                        {puestosSugeridos.length} perfil(es) activo(s) disponible(s) para{' '}
                         {formulario.department || 'las áreas municipales'}.
                       </p>
                     )}
@@ -739,7 +769,7 @@ export default function SolicitudesCobertura() {
                       onSubmit={extenderFechaCierre}
                       className="flex flex-col gap-3 sm:flex-row sm:items-end"
                     >
-                      <label className="flex-1 text-xs font-semibold text-gray-700">
+                      <label className="block flex-1 text-xs font-semibold text-gray-700">
                         Nueva fecha límite
                         <input
                           type="date"
@@ -747,19 +777,15 @@ export default function SolicitudesCobertura() {
                           min={fechaMinima()}
                           value={fechaExtension}
                           onChange={(event) => setFechaExtension(event.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
+                          className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-normal"
                         />
                       </label>
                       <button
                         type="submit"
                         disabled={guardandoExtension}
-                        className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:bg-gray-400"
+                        className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:opacity-60"
                       >
-                        {guardandoExtension
-                          ? 'Guardando...'
-                          : solicitudSeleccionada.application_deadline
-                            ? 'Guardar ampliación'
-                            : 'Guardar fecha límite'}
+                        {guardandoExtension ? 'Guardando...' : 'Guardar fecha'}
                       </button>
                       <button
                         type="button"
@@ -767,7 +793,7 @@ export default function SolicitudesCobertura() {
                           setMostrarExtension(false);
                           setFechaExtension('');
                         }}
-                        className="rounded-lg border px-4 py-2 text-xs font-semibold text-gray-700"
+                        className="rounded-lg border px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50"
                       >
                         Cancelar
                       </button>
@@ -776,52 +802,49 @@ export default function SolicitudesCobertura() {
                 </div>
               )}
 
-            <div className="mt-6 flex justify-between border-t pt-4">
-              {['admin', 'hr_specialist'].includes(user?.role) ? (
-                <div className="flex flex-wrap gap-2">
-                  {['pending', 'in_review'].includes(solicitudSeleccionada.estado) && (
-                    <button
-                      type="button"
-                      onClick={() => cambiarEstadoSolicitud('approved')}
-                      disabled={actualizandoEstado}
-                      className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-gray-400"
-                    >
-                      {actualizandoEstado ? 'Actualizando...' : 'Aprobar y publicar'}
-                    </button>
-                  )}
-                  {solicitudSeleccionada.estado === 'approved' && (
-                    <button
-                      type="button"
-                      onClick={() => cambiarEstadoSolicitud('in_review')}
-                      disabled={actualizandoEstado}
-                      className="rounded-lg border border-amber-400 px-4 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:text-gray-400"
-                    >
-                      {actualizandoEstado ? 'Actualizando...' : 'Retirar del portal'}
-                    </button>
-                  )}
-                  {ESTADOS_PERMITIDOS_EDICION_ELIMINACION.includes(solicitudSeleccionada.estado) && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => editarSolicitud(solicitudSeleccionada)}
-                        className="rounded-lg border border-gray-400 px-4 py-2 text-xs font-semibold text-black hover:bg-gray-100"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => eliminarSolicitud(solicitudSeleccionada)}
-                        disabled={eliminando === solicitudSeleccionada.requestId}
-                        className="rounded-lg border border-red-300 px-4 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:text-gray-400"
-                      >
-                        {eliminando === solicitudSeleccionada.requestId ? 'Eliminando...' : 'Eliminar'}
-                      </button>
-                    </>
-                  )}
+            {['admin', 'hr_specialist'].includes(user?.role) &&
+              ['pending', 'in_review'].includes(solicitudSeleccionada.estado) && (
+                <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
+                  <button
+                    type="button"
+                    disabled={actualizandoEstado}
+                    onClick={() => cambiarEstadoSolicitud('approved')}
+                    className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
+                  >
+                    {actualizandoEstado ? 'Actualizando...' : 'Aprobar convocatoria'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actualizandoEstado}
+                    onClick={() => cambiarEstadoSolicitud('rejected')}
+                    className="rounded-lg bg-red-700 px-4 py-2 text-xs font-semibold text-white hover:bg-red-800 disabled:opacity-60"
+                  >
+                    Rechazar
+                  </button>
                 </div>
-              ) : (
-                <span />
               )}
+
+            <div className="mt-6 flex justify-end gap-3 border-t pt-4">
+              {ESTADOS_PERMITIDOS_EDICION_ELIMINACION.includes(solicitudSeleccionada.estado) &&
+                ['admin', 'hr_specialist'].includes(user?.role) && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => editarSolicitud(solicitudSeleccionada)}
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={eliminando === solicitudSeleccionada.requestId}
+                      onClick={() => eliminarSolicitud(solicitudSeleccionada)}
+                      className="rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {eliminando === solicitudSeleccionada.requestId ? 'Eliminando...' : 'Eliminar'}
+                    </button>
+                  </>
+                )}
               <button
                 type="button"
                 onClick={() => setSolicitudSeleccionada(null)}
