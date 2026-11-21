@@ -5,6 +5,56 @@ import UserDropdown from '../components/UserDropdown';
 import { apiRequest } from '../services/api';
 import { useAuth } from '../auth/AuthContext';
 
+const RANGOS_POR_NIVEL = {
+  'Técnico / Campo': { min: 1000, max: 3500 },
+  'Técnico / Operativo': { min: 1000, max: 3500 },
+  Técnico: { min: 1000, max: 3500 },
+  Profesional: { min: 2000, max: 9000 },
+};
+
+const RANGO_GENERAL = { min: 0.01, max: 15000 };
+
+function obtenerRangoRemuneracion(nivel) {
+  return RANGOS_POR_NIVEL[String(nivel ?? '').trim()] ?? RANGO_GENERAL;
+}
+
+function formatearMoneda(monto) {
+  return `S/ ${Number(monto).toLocaleString('es-PE', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function sanitizarRemuneracionInput(rawValue) {
+  let cleaned = String(rawValue ?? '')
+    .replace(/,/g, '.')
+    .replace(/[^0-9.]/g, '');
+
+  const firstDotIndex = cleaned.indexOf('.');
+  if (firstDotIndex !== -1) {
+    const integerPart = cleaned.slice(0, firstDotIndex + 1);
+    const decimalPart = cleaned
+      .slice(firstDotIndex + 1)
+      .replace(/\./g, '')
+      .slice(0, 2);
+    cleaned = `${integerPart}${decimalPart}`;
+  }
+
+  return cleaned;
+}
+
+function sanitizarSoloLetras(rawValue) {
+  return String(rawValue ?? '')
+    .replace(/[0-9]/g, '')
+    .replace(/[^A-Za-zÁÉÍÓÚÜáéíóúüÑñ\s.,;:/()-]/g, '');
+}
+
+function sanitizarCodigoPerfil(rawValue) {
+  return String(rawValue ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, '');
+}
+
 const emptyProfile = {
   title: '',
   department: '',
@@ -19,6 +69,21 @@ const emptyProfile = {
   description: '',
   competencies: '',
   functions: '',
+};
+
+const emptyFieldFeedback = {
+  title: null,
+  profileCode: null,
+  department: null,
+  level: null,
+  remuneration: null,
+  generalExperience: null,
+  specificExperience: null,
+  technicalKnowledge: null,
+  competencies: null,
+  functions: null,
+  principalRequirements: null,
+  description: null,
 };
 
 const ESTADOS_INACTIVOS = ['inactive', 'inactivo', 'desactivado', 'disabled'];
@@ -88,9 +153,44 @@ const toLines = (value) => {
     .filter(Boolean);
 };
 
-function ProfileField({ label, value, onChange, rows = 1, required = false, type = 'text', step }) {
-  const className =
-    'mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900';
+function getInputClasses(feedback, extraClasses = '') {
+  let stateClasses =
+    'border-gray-300 focus:border-blue-900 focus:ring-1 focus:ring-blue-900/20';
+
+  if (feedback?.severity === 'error') {
+    stateClasses =
+      'border-red-300 focus:border-red-400 focus:ring-1 focus:ring-red-400/20';
+  } else if (feedback?.severity === 'warning') {
+    stateClasses =
+      'border-amber-300 focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20';
+  }
+
+  return `w-full rounded-lg border bg-white p-2 text-sm text-gray-800 transition-colors focus:outline-none ${stateClasses} ${extraClasses}`;
+}
+
+function getFeedbackBoxClasses(severity) {
+  if (severity === 'error') {
+    return 'mt-1 block rounded-md border border-red-200/80 bg-red-50/70 px-2.5 py-1 text-xs text-red-700';
+  }
+  return 'mt-1 block rounded-md border border-amber-200/80 bg-amber-50/70 px-2.5 py-1 text-xs text-amber-800';
+}
+
+function ProfileField({
+  label,
+  helperText,
+  feedback,
+  value,
+  onChange,
+  onKeyDown,
+  onBeforeInput,
+  rows = 1,
+  required = false,
+  type = 'text',
+  inputMode,
+  placeholder,
+}) {
+  const className = getInputClasses(feedback, 'mt-1');
+
   return (
     <label className="block text-sm font-medium text-gray-700">
       {label}
@@ -100,17 +200,31 @@ function ProfileField({ label, value, onChange, rows = 1, required = false, type
           rows={rows}
           value={value}
           onChange={onChange}
+          onKeyDown={onKeyDown}
+          onBeforeInput={onBeforeInput}
+          placeholder={placeholder}
           required={required}
         />
       ) : (
         <input
           className={className}
           type={type}
-          step={step}
+          inputMode={inputMode}
           value={value}
           onChange={onChange}
+          onKeyDown={onKeyDown}
+          onBeforeInput={onBeforeInput}
+          placeholder={placeholder}
           required={required}
         />
+      )}
+      {feedback?.message && (
+        <span role="alert" className={getFeedbackBoxClasses(feedback.severity)}>
+          {feedback.message}
+        </span>
+      )}
+      {helperText && (
+        <span className="mt-1 block text-xs font-normal text-gray-500">{helperText}</span>
       )}
     </label>
   );
@@ -129,12 +243,20 @@ export default function PerfilPuesto() {
   const [areaFilter, setAreaFilter] = useState('Todas');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(emptyProfile);
+  const [fieldFeedback, setFieldFeedback] = useState(emptyFieldFeedback);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deactivating, setDeactivating] = useState('');
   const [deleting, setDeleting] = useState('');
   const [error, setError] = useState('');
+
+  function abrirNuevoFormulario() {
+    setError('');
+    setFieldFeedback(emptyFieldFeedback);
+    setForm(emptyProfile);
+    setShowForm(true);
+  }
 
   async function loadProfiles() {
     setLoading(true);
@@ -169,6 +291,142 @@ export default function PerfilPuesto() {
     }
   }, [puedeGestionarPerfiles]);
 
+  function handleSoloLetrasKeyDown(fieldName) {
+    return (event) => {
+      if (
+        /^[0-9]$/.test(event.key) ||
+        (event.code?.startsWith('Numpad') && /[0-9]/.test(event.key))
+      ) {
+        event.preventDefault();
+        setFieldFeedback((prev) => ({
+          ...prev,
+          [fieldName]: {
+            message: 'Solo se permiten letras; no se aceptan números.',
+            severity: 'warning',
+          },
+        }));
+      }
+    };
+  }
+
+  function handleSoloLetrasBeforeInput(fieldName) {
+    return (event) => {
+      const data = event.data ?? '';
+      if (/[0-9]/.test(data)) {
+        event.preventDefault();
+        setFieldFeedback((prev) => ({
+          ...prev,
+          [fieldName]: {
+            message: 'Solo se permiten letras; no se aceptan números.',
+            severity: 'warning',
+          },
+        }));
+      }
+    };
+  }
+
+  function handleSoloLetrasChange(fieldName) {
+    return (event) => {
+      const rawValue = event.target.value;
+      const sanitized = sanitizarSoloLetras(rawValue);
+      const tuvoNumeros = /[0-9]/.test(rawValue);
+
+      setFieldFeedback((prev) => ({
+        ...prev,
+        [fieldName]: tuvoNumeros
+          ? {
+              message: 'Solo se permiten letras; no se aceptan números.',
+              severity: 'warning',
+            }
+          : rawValue !== sanitized
+            ? {
+                message: 'Solo se permiten letras y signos básicos.',
+                severity: 'warning',
+              }
+            : null,
+      }));
+
+      if (error) setError('');
+      setForm((prev) => ({ ...prev, [fieldName]: sanitized }));
+    };
+  }
+
+  function soloLetrasFieldProps(fieldName, label, extra = {}) {
+    return {
+      label,
+      helperText: 'Solo letras (no se aceptan números).',
+      feedback: fieldFeedback[fieldName],
+      value: form[fieldName],
+      onChange: handleSoloLetrasChange(fieldName),
+      onKeyDown: handleSoloLetrasKeyDown(fieldName),
+      onBeforeInput: handleSoloLetrasBeforeInput(fieldName),
+      ...extra,
+    };
+  }
+
+  function handleCodeChange(event) {
+    const rawValue = event.target.value;
+    const sanitized = sanitizarCodigoPerfil(rawValue);
+
+    setFieldFeedback((prev) => ({
+      ...prev,
+      profileCode:
+        rawValue !== sanitized
+          ? {
+              message: 'Solo se permiten letras, números y guiones.',
+              severity: 'warning',
+            }
+          : null,
+    }));
+
+    if (error) setError('');
+    setForm((prev) => ({ ...prev, profileCode: sanitized }));
+  }
+
+  function handleRemunerationChange(event) {
+    const rawValue = event.target.value;
+    const sanitized = sanitizarRemuneracionInput(rawValue);
+    const intentoLetrasOSimbolos = /[A-Za-zÁÉÍÓÚÜáéíóúüÑñ-]/.test(rawValue);
+
+    if (sanitized !== '' && Number(sanitized) === 0 && !sanitized.endsWith('.')) {
+      const msg = 'Ingresa un monto mayor a cero.';
+      setFieldFeedback((prev) => ({
+        ...prev,
+        remuneration: { message: msg, severity: 'error' },
+      }));
+      setError(`Remuneración referencial (S/): ${msg}`);
+      setForm((prev) => ({ ...prev, remuneration: '' }));
+      return;
+    }
+
+    setFieldFeedback((prev) => ({
+      ...prev,
+      remuneration: intentoLetrasOSimbolos
+        ? {
+            message: 'Solo se aceptan números positivos.',
+            severity: 'warning',
+          }
+        : null,
+    }));
+
+    if (error) setError('');
+    setForm((prev) => ({ ...prev, remuneration: sanitized }));
+  }
+
+  function handleRemunerationKeyDown(event) {
+    if (['e', 'E', '+', '-'].includes(event.key)) {
+      const msg =
+        event.key === '-'
+          ? 'No se aceptan montos negativos.'
+          : 'Solo se aceptan números positivos.';
+      setFieldFeedback((prev) => ({
+        ...prev,
+        remuneration: { message: msg, severity: 'warning' },
+      }));
+      event.preventDefault();
+    }
+  }
+
   function findDuplicateProfile() {
     const cleanTitle = normalizeText(form.title);
     const cleanDepartment = normalizeText(form.department);
@@ -195,51 +453,138 @@ export default function PerfilPuesto() {
   async function saveProfile(event) {
     event.preventDefault();
     setError('');
+    setFieldFeedback(emptyFieldFeedback);
+
+    const cleanTitle = sanitizarSoloLetras(form.title).trim();
+    if (!cleanTitle || !/[A-Za-zÁÉÍÓÚÜáéíóúüÑñ]/.test(cleanTitle)) {
+      const msg = 'Solo se permiten letras; no puede quedar vacío.';
+      setFieldFeedback((prev) => ({
+        ...prev,
+        title: { message: msg, severity: 'error' },
+      }));
+      setError(`Nombre del puesto: ${msg}`);
+      return;
+    }
+
+    if (!String(form.department || '').trim()) {
+      const msg = 'Selecciona una unidad orgánica.';
+      setFieldFeedback((prev) => ({
+        ...prev,
+        department: { message: msg, severity: 'error' },
+      }));
+      setError(`Unidad orgánica: ${msg}`);
+      return;
+    }
+
+    if (!String(form.level || '').trim()) {
+      const msg = 'Selecciona un nivel o grupo.';
+      setFieldFeedback((prev) => ({
+        ...prev,
+        level: { message: msg, severity: 'error' },
+      }));
+      setError(`Nivel / grupo: ${msg}`);
+      return;
+    }
+
+    const camposLetras = [
+      { key: 'generalExperience', label: 'Experiencia general' },
+      { key: 'specificExperience', label: 'Experiencia específica' },
+      { key: 'technicalKnowledge', label: 'Conocimientos técnicos' },
+      { key: 'competencies', label: 'Competencias' },
+      { key: 'functions', label: 'Funciones principales' },
+      { key: 'principalRequirements', label: 'Otros requisitos' },
+      { key: 'description', label: 'Descripción / misión del puesto' },
+    ];
+
+    for (const campo of camposLetras) {
+      if (/[0-9]/.test(String(form[campo.key] || ''))) {
+        const msg = 'Solo se permiten letras; no se aceptan números.';
+        setFieldFeedback((prev) => ({
+          ...prev,
+          [campo.key]: { message: msg, severity: 'error' },
+        }));
+        setError(`${campo.label}: ${msg}`);
+        return;
+      }
+    }
 
     const duplicate = findDuplicateProfile();
     if (duplicate) {
-      setError(
-        `Ya existe un perfil activo registrado con ese puesto en la misma unidad orgánica o con el mismo código («${duplicate.title}» — ${duplicate.department}).`
-      );
+      const msg = `Ya existe un perfil activo con ese puesto en «${duplicate.department}» o con ese código («${duplicate.title}»).`;
+      setFieldFeedback((prev) => ({
+        ...prev,
+        title: { message: msg, severity: 'error' },
+      }));
+      setError(`Nombre del puesto: ${msg}`);
       return;
+    }
+
+    const rangoActual = obtenerRangoRemuneracion(form.level);
+    const nivelTexto = String(form.level || '').trim();
+    let parsedSalary = null;
+
+    if (form.remuneration !== '' && form.remuneration !== null && form.remuneration !== undefined) {
+      parsedSalary = Number(form.remuneration);
+      if (Number.isNaN(parsedSalary) || !Number.isFinite(parsedSalary)) {
+        const msg = 'Solo se aceptan números válidos.';
+        setFieldFeedback((prev) => ({
+          ...prev,
+          remuneration: { message: msg, severity: 'error' },
+        }));
+        setError(`Remuneración referencial (S/): ${msg}`);
+        return;
+      }
+      if (parsedSalary <= 0) {
+        const msg = 'Ingresa un monto mayor a cero.';
+        setFieldFeedback((prev) => ({
+          ...prev,
+          remuneration: { message: msg, severity: 'error' },
+        }));
+        setError(`Remuneración referencial (S/): ${msg}`);
+        return;
+      }
+      if (parsedSalary < rangoActual.min || parsedSalary > rangoActual.max) {
+        const msg = nivelTexto
+          ? `Debe estar entre ${formatearMoneda(rangoActual.min)} y ${formatearMoneda(rangoActual.max)} para ${nivelTexto}.`
+          : `Debe estar entre ${formatearMoneda(rangoActual.min)} y ${formatearMoneda(rangoActual.max)}.`;
+        setFieldFeedback((prev) => ({
+          ...prev,
+          remuneration: { message: msg, severity: 'error' },
+        }));
+        setError(`Remuneración referencial (S/): ${msg}`);
+        return;
+      }
     }
 
     setSaving(true);
     try {
-      const parsedSalary =
-        form.remuneration === '' || form.remuneration === null || form.remuneration === undefined
-          ? null
-          : Number(form.remuneration);
-
-      if (parsedSalary !== null && Number.isNaN(parsedSalary)) {
-        setError('La remuneración referencial debe ser un número válido.');
-        setSaving(false);
-        return;
-      }
-
       await apiRequest('/profiles', {
         method: 'POST',
         body: JSON.stringify({
-          title: String(form.title).trim(),
+          title: cleanTitle,
           department: String(form.department).trim(),
           level: String(form.level).trim(),
-          profileCode: String(form.profileCode).trim(),
+          profileCode: sanitizarCodigoPerfil(form.profileCode).trim(),
           remuneration: parsedSalary,
           education: String(form.education).trim(),
-          generalExperience: String(form.generalExperience).trim(),
-          specificExperience: String(form.specificExperience).trim(),
-          technicalKnowledge: String(form.technicalKnowledge).trim(),
-          principalRequirements: String(form.principalRequirements).trim(),
-          description: String(form.description).trim(),
-          competencies: toLines(form.competencies).map((name) => ({ name, description: '' })),
-          functions: toLines(form.functions),
+          generalExperience: sanitizarSoloLetras(form.generalExperience).trim(),
+          specificExperience: sanitizarSoloLetras(form.specificExperience).trim(),
+          technicalKnowledge: sanitizarSoloLetras(form.technicalKnowledge).trim(),
+          principalRequirements: sanitizarSoloLetras(form.principalRequirements).trim(),
+          description: sanitizarSoloLetras(form.description).trim(),
+          competencies: toLines(sanitizarSoloLetras(form.competencies)).map((name) => ({
+            name,
+            description: '',
+          })),
+          functions: toLines(sanitizarSoloLetras(form.functions)),
         }),
       });
       await loadProfiles();
       setForm(emptyProfile);
+      setFieldFeedback(emptyFieldFeedback);
       setShowForm(false);
     } catch (requestError) {
-      setError(requestError.message);
+      setError(`No se pudo guardar el perfil: ${requestError.message}`);
     } finally {
       setSaving(false);
     }
@@ -331,6 +676,11 @@ export default function PerfilPuesto() {
     return areaMatches && textMatches;
   });
 
+  const rangoFormulario = obtenerRangoRemuneracion(form.level);
+  const textoAyudaRemuneracion = String(form.level || '').trim()
+    ? `Rango: ${formatearMoneda(rangoFormulario.min)} a ${formatearMoneda(rangoFormulario.max)} (${String(form.level).trim()}). Ingresa un monto mayor a cero.`
+    : `Rango: ${formatearMoneda(rangoFormulario.min)} a ${formatearMoneda(rangoFormulario.max)}. Ingresa un monto mayor a cero.`;
+
   return (
     <div className="app-shell flex h-dvh flex-col bg-gray-100 font-sans text-gray-800 md:flex-row">
       <Sidebar />
@@ -346,10 +696,10 @@ export default function PerfilPuesto() {
         </header>
 
         <main className="p-8 space-y-6">
-          {error && (
+          {error && !showForm && (
             <div
               role="alert"
-              className="rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-700"
+              className="rounded-lg border border-red-200/80 bg-red-50/70 px-4 py-3 text-sm text-red-700"
             >
               {error}
             </div>
@@ -370,11 +720,7 @@ export default function PerfilPuesto() {
             </div>
             {puedeGestionarPerfiles && (
               <button
-                onClick={() => {
-                  setError('');
-                  setForm(emptyProfile);
-                  setShowForm(true);
-                }}
+                onClick={abrirNuevoFormulario}
                 className="bg-blue-950 hover:bg-blue-900 text-white font-semibold text-sm px-4 py-2.5 rounded-lg"
               >
                 + Nuevo perfil
@@ -388,12 +734,12 @@ export default function PerfilPuesto() {
               placeholder="Buscar por puesto, código o requisitos..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="w-full md:w-2/3 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              className="w-full md:w-2/3 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-blue-900 focus:outline-none focus:ring-1 focus:ring-blue-900/20"
             />
             <select
               value={areaFilter}
               onChange={(event) => setAreaFilter(event.target.value)}
-              className="w-full md:w-1/3 border border-gray-300 rounded-lg p-2 text-sm"
+              className="w-full md:w-1/3 border border-gray-300 rounded-lg p-2 text-sm focus:border-blue-900 focus:outline-none focus:ring-1 focus:ring-blue-900/20"
             >
               <option value="Todas">Todas las unidades orgánicas</option>
               {areas.map((area) => (
@@ -480,7 +826,9 @@ export default function PerfilPuesto() {
                 {!loading && filteredProfiles.length === 0 && (
                   <tr>
                     <td colSpan="6" className="py-6 text-center text-gray-500">
-                      {error ? 'No se pudieron cargar los perfiles.' : 'No hay perfiles activos registrados.'}
+                      {error
+                        ? 'No se pudieron cargar los perfiles.'
+                        : 'No hay perfiles activos registrados.'}
                     </td>
                   </tr>
                 )}
@@ -517,26 +865,37 @@ export default function PerfilPuesto() {
                 ×
               </button>
             </div>
+
+            {error && (
+              <div
+                role="alert"
+                className="mb-4 rounded-lg border border-red-200/80 bg-red-50/70 px-4 py-3 text-sm text-red-700"
+              >
+                {error}
+              </div>
+            )}
+
             <form onSubmit={saveProfile} className="space-y-5">
               <section className="grid gap-4 md:grid-cols-2">
-                <ProfileField
-                  label="Nombre del puesto"
-                  required
-                  value={form.title}
-                  onChange={(event) => setForm({ ...form, title: event.target.value })}
-                />
+                <ProfileField {...soloLetrasFieldProps('title', 'Nombre del puesto', { required: true })} />
                 <ProfileField
                   label="Código del perfil"
+                  helperText="Letras, números y guiones (ej. PRF-TIC-001)."
+                  feedback={fieldFeedback.profileCode}
                   value={form.profileCode}
-                  onChange={(event) => setForm({ ...form, profileCode: event.target.value })}
+                  onChange={handleCodeChange}
                 />
                 <label className="block text-sm font-medium text-gray-700">
                   Unidad orgánica
                   <select
                     required
                     value={form.department}
-                    onChange={(event) => setForm({ ...form, department: event.target.value })}
-                    className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
+                    onChange={(event) => {
+                      setFieldFeedback((prev) => ({ ...prev, department: null }));
+                      if (error) setError('');
+                      setForm({ ...form, department: event.target.value });
+                    }}
+                    className={getInputClasses(fieldFeedback.department, 'mt-1')}
                   >
                     <option value="">Selecciona un área</option>
                     {availableDepartments.map((departmentName) => (
@@ -545,14 +904,26 @@ export default function PerfilPuesto() {
                       </option>
                     ))}
                   </select>
+                  {fieldFeedback.department?.message && (
+                    <span
+                      role="alert"
+                      className={getFeedbackBoxClasses(fieldFeedback.department.severity)}
+                    >
+                      {fieldFeedback.department.message}
+                    </span>
+                  )}
                 </label>
                 <label className="block text-sm font-medium text-gray-700">
                   Nivel / Grupo
                   <select
                     required
                     value={form.level}
-                    onChange={(event) => setForm({ ...form, level: event.target.value })}
-                    className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
+                    onChange={(event) => {
+                      setFieldFeedback((prev) => ({ ...prev, level: null, remuneration: null }));
+                      if (error) setError('');
+                      setForm({ ...form, level: event.target.value });
+                    }}
+                    className={getInputClasses(fieldFeedback.level, 'mt-1')}
                   >
                     <option value="">Selecciona un nivel o grupo</option>
                     {availableLevels.map((level) => (
@@ -561,20 +932,32 @@ export default function PerfilPuesto() {
                       </option>
                     ))}
                   </select>
+                  {fieldFeedback.level?.message && (
+                    <span
+                      role="alert"
+                      className={getFeedbackBoxClasses(fieldFeedback.level.severity)}
+                    >
+                      {fieldFeedback.level.message}
+                    </span>
+                  )}
                 </label>
                 <ProfileField
                   label="Remuneración referencial (S/)"
-                  type="number"
-                  step="0.01"
+                  helperText={textoAyudaRemuneracion}
+                  feedback={fieldFeedback.remuneration}
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Ej. 2500.00"
                   value={form.remuneration}
-                  onChange={(event) => setForm({ ...form, remuneration: event.target.value })}
+                  onChange={handleRemunerationChange}
+                  onKeyDown={handleRemunerationKeyDown}
                 />
                 <label className="block text-sm font-medium text-gray-700">
                   Formación académica
                   <select
                     value={form.education}
                     onChange={(event) => setForm({ ...form, education: event.target.value })}
-                    className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900"
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white p-2 text-sm text-gray-800 transition-colors focus:border-blue-900 focus:outline-none focus:ring-1 focus:ring-blue-900/20"
                   >
                     <option value="">Selecciona una formación</option>
                     {availableEducations.map((education) => (
@@ -585,49 +968,38 @@ export default function PerfilPuesto() {
                   </select>
                 </label>
                 <ProfileField
-                  label="Experiencia general"
-                  rows={2}
-                  value={form.generalExperience}
-                  onChange={(event) => setForm({ ...form, generalExperience: event.target.value })}
+                  {...soloLetrasFieldProps('generalExperience', 'Experiencia general', { rows: 2 })}
                 />
                 <ProfileField
-                  label="Experiencia específica"
-                  rows={2}
-                  value={form.specificExperience}
-                  onChange={(event) => setForm({ ...form, specificExperience: event.target.value })}
+                  {...soloLetrasFieldProps('specificExperience', 'Experiencia específica', { rows: 2 })}
                 />
               </section>
               <ProfileField
-                label="Conocimientos técnicos / certificaciones (uno por línea)"
-                rows={4}
-                value={form.technicalKnowledge}
-                onChange={(event) => setForm({ ...form, technicalKnowledge: event.target.value })}
+                {...soloLetrasFieldProps(
+                  'technicalKnowledge',
+                  'Conocimientos técnicos / certificaciones (uno por línea)',
+                  { rows: 4 }
+                )}
               />
               <ProfileField
-                label="Competencias (una por línea)"
-                rows={3}
-                value={form.competencies}
-                onChange={(event) => setForm({ ...form, competencies: event.target.value })}
+                {...soloLetrasFieldProps('competencies', 'Competencias (una por línea)', {
+                  rows: 3,
+                })}
               />
               <ProfileField
-                label="Funciones principales (una por línea)"
-                rows={5}
-                value={form.functions}
-                onChange={(event) => setForm({ ...form, functions: event.target.value })}
+                {...soloLetrasFieldProps('functions', 'Funciones principales (una por línea)', {
+                  rows: 5,
+                })}
               />
               <ProfileField
-                label="Otros requisitos principales"
-                rows={3}
-                value={form.principalRequirements}
-                onChange={(event) =>
-                  setForm({ ...form, principalRequirements: event.target.value })
-                }
+                {...soloLetrasFieldProps('principalRequirements', 'Otros requisitos principales', {
+                  rows: 3,
+                })}
               />
               <ProfileField
-                label="Descripción / misión del puesto"
-                rows={3}
-                value={form.description}
-                onChange={(event) => setForm({ ...form, description: event.target.value })}
+                {...soloLetrasFieldProps('description', 'Descripción / misión del puesto', {
+                  rows: 3,
+                })}
               />
               <div className="flex justify-end gap-3 border-t pt-4">
                 <button
