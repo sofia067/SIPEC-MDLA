@@ -1,0 +1,164 @@
+[
+  {
+    "code": "PRF-DESSDO-01",
+    "title": "Especialista / Asistente Social para Programas Sociales",
+    "department": "Subgerencia de Desarrollo Social, DEMUNA y OMAPED",
+    "reason": "Requerimiento de personal profesional para la atención social, empadronamiento socioeconómico y seguimiento de programas sociales y asistencia a poblaciones vulnerables.",
+    "educationLevel": "Título profesional",
+    "generalExperience": "Mínimo dos (02) años de experiencia general en el sector público o privado.",
+    "specificExperience": "Mínimo un (01) año en programas sociales (SISFOH, Vaso de Leche, DEMUNA, OMAPED o CIAM).",
+    "technicalKnowledge": "Manejo del sistema SISFOH, empadronamiento socioeconómico, gestión de programas sociales municipales y ofimática intermedia.",
+    "competencies": [
+      "Vocación de servicio al ciudadano",
+      "Empatía y trabajo comunitario",
+      "Trabajo en equipo",
+      "Ética e integridad pública"
+    ],
+    "positionLevel": "Profesional",
+    "referenceSalary": "2800.00"
+  },
+  {
+    "code": "PRF-SECAGTMD-01",
+    "title": "Registrador Civil y Atención al Ciudadano",
+    "department": "Secretaría General / Oficina de Trámite Documental",
+    "reason": "Cobertura de plaza para la inscripción y certificación de registros civiles, atención ciudadana y gestión documental conforme a la normativa vigente.",
+    "educationLevel": "Técnica superior",
+    "generalExperience": "Mínimo dos (02) años de experiencia general en funciones administrativas.",
+    "specificExperience": "Mínimo un (01) año en registro civil, trámite documentario o atención al público en municipalidades.",
+    "technicalKnowledge": "Normativa de Registro Nacional de Identificación y Estado Civil (RENIEC), Ley N° 27444, digitalización de actas y atención al ciudadano.",
+    "competencies": [
+      "Orientación a resultados",
+      "Atención al detalle y rigor documental",
+      "Comunicación efectiva",
+      "Integridad y confidencialidad"
+    ],
+    "positionLevel": "Técnico",
+    "referenceSalary": "2200.00"
+  },
+  {
+    "code": "PRF-TECAINGD-01",
+    "title": "Administrador de Redes, Soporte e Infraestructura TI",
+    "department": "Subgerencia de Tecnologías de la Información y Gobierno Digital",
+    "reason": "Garantizar la continuidad operativa de redes, servidores, estaciones de trabajo, seguridad informática y soporte técnico de las áreas municipales.",
+    "educationLevel": "Bachiller universitario",
+    "generalExperience": "Mínimo dos (02) años de experiencia general en áreas de sistemas o soporte técnico.",
+    "specificExperience": "Mínimo un (01) año en administración de redes LAN/WLAN, servidores, seguridad perimetral y mesa de ayuda.",
+    "technicalKnowledge": "Redes TCP/IP, VLAN, firewalls, Windows Server / Linux, respaldos de bases de datos, cableado estructurado y soporte de hardware.",
+    "competencies": [
+      "Análisis y resolución de problemas",
+      "Proactividad",
+      "Trabajo bajo presión",
+      "Seguridad de la información"
+    ],
+    "positionLevel": "Profesional",
+    "referenceSalary": "3000.00"
+  },
+  {
+    "code": "PRF-LOGSCP-01",
+    "title": "Especialista en Contrataciones del Estado (OEC)",
+    "department": "Subgerencia de Logística y Control Patrimonial",
+    "reason": "Fortalecer los procesos de selección y adquisiciones del órgano encargado de las contrataciones en cumplimiento de la normativa vigente.",
+    "educationLevel": "Título profesional",
+    "generalExperience": "Mínimo tres (03) años de experiencia general en el sector público.",
+    "specificExperience": "Mínimo dos (02) años en órganos encargados de las contrataciones (OEC) y manejo de SEACE.",
+    "technicalKnowledge": "Ley de Contrataciones del Estado y su Reglamento, plataforma SEACE, SIGA MEF, elaboración de términos de referencia y cuadros comparativos.",
+    "competencies": [
+      "Transparencia y probidad",
+      "Planificación y organización",
+      "Rigor normativo",
+      "Trabajo en equipo"
+    ],
+    "positionLevel": "Profesional",
+    "referenceSalary": "3500.00"
+  },
+  {
+    "code": "PRF-LOGSCP-02",
+    "title": "Asistente de Almacén y Control de Stock",
+    "department": "Subgerencia de Logística y Control Patrimonial",
+    "reason": "Controlar el ingreso, almacenamiento, custodia y despacho de bienes y suministros municipales manteniendo el inventario actualizado.",
+    "educationLevel": "Técnica superior",
+    "generalExperience": "Mínimo un (01) año de experiencia general.",
+    "specificExperience": "Mínimo seis (06) meses o un (01) año en control de almacenes, inventarios o logística.",
+    "technicalKnowledge": "Control de inventarios, guías de remisión, kardex, SIGA MEF y hojas de cálculo.",
+    "competencies": [
+      "Orden y responsabilidad",
+      "Atención al detalle",
+      "Trabajo en equipo",
+      "Integridad"
+    ],
+    "positionLevel": "Técnico",
+    "referenceSalary": "2000.00"
+  },
+  {
+    "code": "PRF-ASESJUR-01",
+    "title": "Especialista Legal en Gestión Pública",
+    "department": "Oficina de Asesoría Jurídica",
+    "reason": "Brindar asesoría jurídica especializada, emitir informes legales y revisar proyectos de resoluciones, contratos y actos administrativos municipales.",
+    "educationLevel": "Título profesional",
+    "generalExperience": "Mínimo tres (03) años de experiencia general en el ejercicio profesional.",
+    "specificExperience": "Mínimo dos (02) años en asesoría legal municipal, derecho administrativo o gestión pública.",
+    "technicalKnowledge": "Ley Orgánica de Municipalidades (Ley N° 27972), TUO de la Ley N° 27444, redacción de informes legales, ordenanzas y resoluciones.",
+    "competencies": [
+      "Criterio jurídico y analítico",
+      "Redacción técnica y normativa",
+      "Ética profesional",
+      "Responsabilidad"
+    ],
+    "positionLevel": "Profesional",
+    "referenceSalary": "3500.00"
+  },
+  {
+    "code": "PRF-ADMF-01",
+    "title": "Jefe de la Oficina de Administración y Finanzas",
+    "department": "Oficina de Administración y Finanzas",
+    "reason": "Conducir la gestión administrativa, presupuestaria, contable, de tesorería y de recursos humanos de la entidad municipal.",
+    "educationLevel": "Título profesional",
+    "generalExperience": "Mínimo cuatro (04) años de experiencia general.",
+    "specificExperience": "Mínimo dos (02) años en gestión administrativa o financiera en el sector público.",
+    "technicalKnowledge": "SIAF, SIGA, presupuesto público, tesorería, contabilidad gubernamental y normativa municipal.",
+    "competencies": [
+      "Liderazgo y toma de decisiones",
+      "Planificación estratégica",
+      "Integridad y transparencia",
+      "Comunicación asertiva"
+    ],
+    "positionLevel": "Directivo / Profesional",
+    "referenceSalary": "4200.00"
+  },
+  {
+    "code": "PRF-CONT-01",
+    "title": "Encargado de la Unidad de Contabilidad",
+    "department": "Oficina de Administración y Finanzas",
+    "reason": "Asegurar el registro contable oportuno, conciliaciones y elaboración de estados financieros conforme a la normativa contable gubernamental.",
+    "educationLevel": "Título profesional",
+    "generalExperience": "Mínimo tres (03) años de experiencia general.",
+    "specificExperience": "Mínimo dos (02) años en contabilidad gubernamental o sector público.",
+    "technicalKnowledge": "Plan Contable Gubernamental, SIAF-SP, estados financieros, conciliaciones bancarias y tributación aplicable.",
+    "competencies": [
+      "Precisión y rigor técnico",
+      "Responsabilidad",
+      "Análisis financiero",
+      "Ética profesional"
+    ],
+    "positionLevel": "Profesional",
+    "referenceSalary": "3400.00"
+  },
+  {
+    "code": "PRF-SEREN-01",
+    "title": "Chofer de Serenazgo",
+    "department": "Subgerencia de Seguridad Ciudadana",
+    "reason": "Conducir unidades vehiculares de patrullaje preventivo y apoyo en seguridad ciudadana respetando las normas de tránsito y protocolos operativos.",
+    "educationLevel": "Secundaria completa",
+    "generalExperience": "Mínimo dos (02) años de experiencia conduciendo vehículos.",
+    "specificExperience": "Mínimo un (01) año en conducción de camionetas o vehículos de servicio municipal/institucional.",
+    "technicalKnowledge": "Reglamento Nacional de Tránsito, mecánica básica preventiva, licencia de conducir vigente y protocolos de seguridad vial.",
+    "competencies": [
+      "Prudencia y control emocional",
+      "Puntualidad y disciplina",
+      "Trabajo en equipo",
+      "Vocación de servicio"
+    ],
+    "positionLevel": "Operativo",
+    "referenceSalary": "1900.00"
+  }
+]
