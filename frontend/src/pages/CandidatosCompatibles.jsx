@@ -98,7 +98,15 @@ export default function CandidatosCompatibles() {
     'Sin postulantes registrados';
 
   const areaMostrada = solicitudActiva?.departamento || primerCandidato?.department || '';
-  const descripcionMostrada = solicitudActiva?.descripcion || primerCandidato?.reason || '';
+
+  const descripcionMostrada =
+    solicitudActiva?.descripcion &&
+    !/\b(qa|prueba|test)\b/i.test(String(solicitudActiva.descripcion))
+      ? solicitudActiva.descripcion
+      : primerCandidato?.reason &&
+          !/\b(qa|prueba|test)\b/i.test(String(primerCandidato.reason))
+        ? primerCandidato.reason
+        : '';
 
   async function revisarCv(candidato) {
     setCvSeleccionado(candidato);
@@ -120,7 +128,6 @@ export default function CandidatosCompatibles() {
   useEffect(() => {
     apiRequest('/blind-selection/candidates')
       .then(({ candidates: apiCandidates }) => {
-        // Lee las postulaciones enviadas desde el portal en modo demostración (localStorage)
         let localDemos = [];
         try {
           const saved = JSON.parse(
@@ -133,8 +140,8 @@ export default function CandidatosCompatibles() {
               request_code: app.requestCode || 'DEMO-REQ',
               position_title: app.positionTitle || 'Puesto de demostración',
               priority: 'Alta',
-              department: 'Área Usuaria (Demo)',
-              reason: 'Postulación registrada desde el portal público en modo demostración.',
+              department: 'Área Usuaria',
+              reason: '',
               application_code: app.applicationCode,
               process_stage: app.processStage || 'application_received',
               match_status: 'calculated',
@@ -157,11 +164,9 @@ export default function CandidatosCompatibles() {
           localDemos = [];
         }
 
-        // Priorizamos los candidatos reales del servidor sobre los registros locales
         const allCandidates = [...(apiCandidates || []), ...localDemos];
         setCandidatos(allCandidates);
 
-        // Selecciona por defecto la primera convocatoria oficial disponible
         const primerOficial = allCandidates.find((c) => !c.is_demo);
         setSolicitudFiltro(primerOficial?.request_id ?? allCandidates[0]?.request_id ?? '');
       })
@@ -220,7 +225,7 @@ export default function CandidatosCompatibles() {
             </div>
           </div>
 
-          <label className="flex w-fit items-center gap-2 text-xs text-slate-600">
+          <label className="flex w-fit items-center gap-2 text-xs text-slate-600 cursor-pointer">
             <input
               type="checkbox"
               checked={incluirDemos}
